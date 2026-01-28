@@ -84,14 +84,17 @@ class ResidualTrainer:
         self.device = device
         self.d = config.d
 
-        # Role embeddings (detached to avoid graph accumulation)
-        role_emb = model.role_embedding
-        with torch.no_grad():
-            self._matrix_role = role_emb(torch.tensor(Role.MATRIX.value, device=device)).detach()
-            self._bias_role = role_emb(torch.tensor(Role.VEC_BIAS.value, device=device)).detach()
-            self._output_role = role_emb(torch.tensor(Role.OUTPUT.value, device=device)).detach()
-            # Use VEC_SECONDARY for current estimate (different from output)
-            self._estimate_role = role_emb(torch.tensor(Role.VEC_SECONDARY.value, device=device)).detach()
+        # Cache role indices (not embeddings) for efficient lookup
+        self._role_indices = {
+            'matrix': torch.tensor(Role.MATRIX.value, device=device),
+            'bias': torch.tensor(Role.VEC_BIAS.value, device=device),
+            'output': torch.tensor(Role.OUTPUT.value, device=device),
+            'estimate': torch.tensor(Role.VEC_SECONDARY.value, device=device),
+        }
+
+    def _get_role(self, name: str) -> torch.Tensor:
+        """Get role embedding (with gradient flow)."""
+        return self.model.role_embedding(self._role_indices[name])
 
     def sample_spd(self, B: int, kappa_min: float, kappa_max: float) -> torch.Tensor:
         d, device = self.d, self.device
@@ -118,14 +121,19 @@ class ResidualTrainer:
         embedders = self.model.embedders
         special = self.model.special_tokens
 
-        A_emb = embedders.matrix(A) + self._matrix_role
+        # Get role embeddings (with gradient flow)
+        matrix_role = self._get_role('matrix')
+        bias_role = self._get_role('bias')
+        output_role = self._get_role('output')
+
+        A_emb = embedders.matrix(A) + matrix_role
         b_flat = b_ctx.reshape(B * K, d)
         x_flat = x_ctx.reshape(B * K, d)
         n_embd = embedders.vector(b_flat).shape[-1]
 
-        b_emb = embedders.vector(b_flat).reshape(B, K, n_embd) + self._bias_role
-        x_emb = embedders.vector(x_flat).reshape(B, K, n_embd) + self._output_role
-        b_q_emb = embedders.vector(b_query) + self._bias_role
+        b_emb = embedders.vector(b_flat).reshape(B, K, n_embd) + bias_role
+        x_emb = embedders.vector(x_flat).reshape(B, K, n_embd) + output_role
+        b_q_emb = embedders.vector(b_query) + bias_role
 
         seq_len = 3 * K + 5
         tokens = torch.zeros(B, seq_len, n_embd, device=device)
@@ -164,15 +172,21 @@ class ResidualTrainer:
         embedders = self.model.embedders
         special = self.model.special_tokens
 
-        A_emb = embedders.matrix(A) + self._matrix_role
+        # Get role embeddings (with gradient flow)
+        matrix_role = self._get_role('matrix')
+        bias_role = self._get_role('bias')
+        output_role = self._get_role('output')
+        estimate_role = self._get_role('estimate')
+
+        A_emb = embedders.matrix(A) + matrix_role
         b_flat = b_ctx.reshape(B * K, d)
         x_flat = x_ctx.reshape(B * K, d)
         n_embd = embedders.vector(b_flat).shape[-1]
 
-        b_emb = embedders.vector(b_flat).reshape(B, K, n_embd) + self._bias_role
-        x_emb = embedders.vector(x_flat).reshape(B, K, n_embd) + self._output_role
-        b_q_emb = embedders.vector(b_query) + self._bias_role
-        x_est_emb = embedders.vector(x_estimate) + self._estimate_role  # Different role!
+        b_emb = embedders.vector(b_flat).reshape(B, K, n_embd) + bias_role
+        x_emb = embedders.vector(x_flat).reshape(B, K, n_embd) + output_role
+        b_q_emb = embedders.vector(b_query) + bias_role
+        x_est_emb = embedders.vector(x_estimate) + estimate_role  # Different role!
 
         # Longer sequence: includes estimate before MASK
         seq_len = 3 * K + 6
@@ -306,7 +320,7 @@ def test(model: ComponentTransformerModel, config: Config) -> Dict:
 
     for kappa_min, kappa_max in config.kappa_ranges:
         kappa_key = f"{kappa_min}-{kappa_max}"
-        print(f"\nκ ∈ [{kappa_min}, {kappa_max}]")
+        print(f"\nkappa in [{kappa_min}, {kappa_max}]")
 
         all_mse = {i: [] for i in range(config.test_iterations)}
         improvements = []
@@ -356,7 +370,7 @@ def test(model: ComponentTransformerModel, config: Config) -> Dict:
             "improved_fraction": improved_frac,
         }
 
-        print(f"  MSE: {mse_summary[0]['mean']:.6f} → {mse_summary[config.test_iterations-1]['mean']:.6f}")
+        print(f"  MSE: {mse_summary[0]['mean']:.6f} -> {mse_summary[config.test_iterations-1]['mean']:.6f}")
         print(f"  Improvement: {np.mean(improvements):.2f}x, Fraction improved: {improved_frac*100:.1f}%")
 
     return results
@@ -399,9 +413,9 @@ def main():
     all_fracs = [r["improved_fraction"] for r in test_results.values()]
     avg_frac = np.mean(all_fracs)
     if avg_frac >= 0.5:
-        print(f"✓ SUCCESS: {avg_frac*100:.1f}% of samples improved (≥50%)")
+        print(f"SUCCESS: {avg_frac*100:.1f}% of samples improved (>=50%)")
     else:
-        print(f"✗ BELOW THRESHOLD: {avg_frac*100:.1f}% of samples improved (<50%)")
+        print(f"BELOW THRESHOLD: {avg_frac*100:.1f}% of samples improved (<50%)")
 
     # Save results
     results = {"config": asdict(config), "training": train_history, "testing": test_results}

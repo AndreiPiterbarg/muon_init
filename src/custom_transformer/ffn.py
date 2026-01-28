@@ -4,13 +4,15 @@ from custom_transformer.config import TransformerConfig
 import torch
 class FeedForward(nn.Module):
 
-    def __init__(self, n_embd, ):
+    def __init__(self, n_embd, config: TransformerConfig = None):
         super().__init__()
+        if config is None:
+            config = TransformerConfig()
         self.n_embd = n_embd
         self.first_layer = nn.Linear(n_embd, 4 * n_embd)
         self.activation = nn.GELU()
         self.second_layer = nn.Linear(4 * n_embd, n_embd)
-        self.dropout = nn.Dropout(TransformerConfig.dropout)
+        self.dropout = nn.Dropout(config.dropout)
 
     def forward(self, x):
         x = self.first_layer(x)
@@ -19,24 +21,3 @@ class FeedForward(nn.Module):
         x = self.dropout(x)
         return x
 
-
-
-def ffTest():
-    # Test config
-    batch, seq_len, n_embd = 2, 10, 128
-
-    # Create module
-    ffn = FeedForward(n_embd)
-
-    # Test forward pass
-    x = torch.randn(batch, seq_len, n_embd)
-    out = ffn(x)
-
-    assert out.shape == x.shape, f"Shape mismatch: {out.shape} != {x.shape}"
-    print(f"Input shape:  {x.shape}")
-    print(f"Output shape: {out.shape}")
-    print("FeedForward test passed!")
-if __name__ == "__main__":
-    ffTest()
-
-   

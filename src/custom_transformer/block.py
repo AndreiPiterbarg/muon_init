@@ -20,7 +20,7 @@ def get_norm(norm_type: str, dim: int) -> nn.Module:
         return LayerNorm(dim)
 
 
-class TransformerBLock(nn.Module):
+class TransformerBlock(nn.Module):
 
     def __init__(self, n_embds, n_heads, config: TransformerConfig = None):
         super().__init__()
@@ -30,7 +30,7 @@ class TransformerBLock(nn.Module):
         self.layer_norm1 = get_norm(config.norm_type, n_embds)
         self.layer_norm2 = get_norm(config.norm_type, n_embds)
         self.attention = MultiHeadedAttention(n_embds, n_heads=n_heads, config=config)
-        self.ffw = FeedForward(n_embds)
+        self.ffw = FeedForward(n_embds, config=config)
 
     def forward(self, x: torch.Tensor, return_attention: bool = False):
 

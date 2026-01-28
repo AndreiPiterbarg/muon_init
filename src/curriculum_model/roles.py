@@ -84,26 +84,6 @@ class RoleEmbedding(nn.Module):
         idx = torch.tensor(int(role), device=self.embedding.weight.device)
         return self.embedding(idx)
 
-    def get_matrix_role(self) -> torch.Tensor:
-        """Get embedding for MATRIX role."""
-        return self.get_role(Role.MATRIX)
-
-    def get_primary_role(self) -> torch.Tensor:
-        """Get embedding for VEC_PRIMARY role."""
-        return self.get_role(Role.VEC_PRIMARY)
-
-    def get_secondary_role(self) -> torch.Tensor:
-        """Get embedding for VEC_SECONDARY role."""
-        return self.get_role(Role.VEC_SECONDARY)
-
-    def get_bias_role(self) -> torch.Tensor:
-        """Get embedding for VEC_BIAS role."""
-        return self.get_role(Role.VEC_BIAS)
-
-    def get_scalar_role(self) -> torch.Tensor:
-        """Get embedding for SCALAR role."""
-        return self.get_role(Role.SCALAR)
-
     def get_output_role(self) -> torch.Tensor:
         """Get embedding for OUTPUT role."""
         return self.get_role(Role.OUTPUT)

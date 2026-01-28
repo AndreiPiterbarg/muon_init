@@ -2,7 +2,7 @@
 import torch.nn as nn
 import torch
 from custom_transformer.config import TransformerConfig
-from custom_transformer.utils import create_casual_mask
+from custom_transformer.utils import create_causal_mask
 from custom_transformer.positional import RotaryPositionalEmbeddings
 import torch.nn.functional as F
 import math
@@ -29,7 +29,7 @@ class MultiHeadedAttention(nn.Module):
         self.linear_V = nn.Linear(emb_dim, emb_dim)
 
         self.output_projection = nn.Linear(emb_dim, emb_dim)
-        self.register_buffer('casual_mask', create_casual_mask(512, torch.device('cpu')))
+        self.register_buffer('causal_mask', create_causal_mask(512, torch.device('cpu')))
 
         # RoPE if configured
         self.rope = None
@@ -58,7 +58,7 @@ class MultiHeadedAttention(nn.Module):
         attn_scores = attn_scores * (1.0 / math.sqrt(self.head_dim))
 
         # Apply causal mask
-        attn_scores = attn_scores.masked_fill(self.casual_mask[:, :, :seq_len, :seq_len] == 0, float('-inf'))
+        attn_scores = attn_scores.masked_fill(self.causal_mask[:, :, :seq_len, :seq_len] == 0, float('-inf'))
     
         attn_weights = F.softmax(attn_scores, dim=-1)
         attn_weights_dropped = self.dropout(attn_weights)

@@ -8,10 +8,6 @@ class TransformerConfig:
     n_head: int = 4
     n_positions: int = 40
 
-    batch_size = 64
-    n_dims = 4
-    n_points = 10
-
     # Architecture options
     pos_encoding_type: str = "learned"  # "learned" or "rope"
     norm_type: str = "layernorm"  # "layernorm" or "rmsnorm"
@@ -20,4 +16,4 @@ class TransformerConfig:
 
     pre_norm: bool = True
     dropout: float = 0.0
-    return_attention = True
+    return_attention: bool = True

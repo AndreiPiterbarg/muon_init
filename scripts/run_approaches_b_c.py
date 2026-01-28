@@ -116,25 +116,34 @@ class TokenBuilder:
         self.d = d
         self.device = device
 
-        # Detach role embeddings so they don't accumulate gradients across iterations
-        role_emb = model.role_embedding
-        with torch.no_grad():
-            self.matrix_role = role_emb(torch.tensor(Role.MATRIX.value, device=device)).detach()
-            self.bias_role = role_emb(torch.tensor(Role.VEC_BIAS.value, device=device)).detach()
-            self.output_role = role_emb(torch.tensor(Role.OUTPUT.value, device=device)).detach()
-            self.estimate_role = role_emb(torch.tensor(Role.VEC_SECONDARY.value, device=device)).detach()
+        # Cache role indices (not embeddings) for efficient lookup
+        self._role_indices = {
+            'matrix': torch.tensor(Role.MATRIX.value, device=device),
+            'bias': torch.tensor(Role.VEC_BIAS.value, device=device),
+            'output': torch.tensor(Role.OUTPUT.value, device=device),
+            'estimate': torch.tensor(Role.VEC_SECONDARY.value, device=device),
+        }
+
+    def _get_role(self, name: str) -> torch.Tensor:
+        """Get role embedding (with gradient flow)."""
+        return self.model.role_embedding(self._role_indices[name])
 
     def build_standard(self, A, b_ctx, x_ctx, b_query):
         B, K = b_ctx.shape[:2]
         d, device = self.d, self.device
         embedders, special = self.model.embedders, self.model.special_tokens
 
-        A_emb = embedders.matrix(A) + self.matrix_role
+        # Get role embeddings (with gradient flow)
+        matrix_role = self._get_role('matrix')
+        bias_role = self._get_role('bias')
+        output_role = self._get_role('output')
+
+        A_emb = embedders.matrix(A) + matrix_role
         n_embd = embedders.vector(b_ctx[:, 0]).shape[-1]
 
-        b_emb = embedders.vector(b_ctx.reshape(B * K, d)).reshape(B, K, n_embd) + self.bias_role
-        x_emb = embedders.vector(x_ctx.reshape(B * K, d)).reshape(B, K, n_embd) + self.output_role
-        b_q_emb = embedders.vector(b_query) + self.bias_role
+        b_emb = embedders.vector(b_ctx.reshape(B * K, d)).reshape(B, K, n_embd) + bias_role
+        x_emb = embedders.vector(x_ctx.reshape(B * K, d)).reshape(B, K, n_embd) + output_role
+        b_q_emb = embedders.vector(b_query) + bias_role
 
         seq_len = 3 * K + 5
         tokens = torch.zeros(B, seq_len, n_embd, device=device)
@@ -158,13 +167,19 @@ class TokenBuilder:
         d, device = self.d, self.device
         embedders, special = self.model.embedders, self.model.special_tokens
 
-        A_emb = embedders.matrix(A) + self.matrix_role
+        # Get role embeddings (with gradient flow)
+        matrix_role = self._get_role('matrix')
+        bias_role = self._get_role('bias')
+        output_role = self._get_role('output')
+        estimate_role = self._get_role('estimate')
+
+        A_emb = embedders.matrix(A) + matrix_role
         n_embd = embedders.vector(b_ctx[:, 0]).shape[-1]
 
-        b_emb = embedders.vector(b_ctx.reshape(B * K, d)).reshape(B, K, n_embd) + self.bias_role
-        x_emb = embedders.vector(x_ctx.reshape(B * K, d)).reshape(B, K, n_embd) + self.output_role
-        b_q_emb = embedders.vector(b_query) + self.bias_role
-        x_est_emb = embedders.vector(x_estimate) + self.estimate_role
+        b_emb = embedders.vector(b_ctx.reshape(B * K, d)).reshape(B, K, n_embd) + bias_role
+        x_emb = embedders.vector(x_ctx.reshape(B * K, d)).reshape(B, K, n_embd) + output_role
+        b_q_emb = embedders.vector(b_query) + bias_role
+        x_est_emb = embedders.vector(x_estimate) + estimate_role
 
         seq_len = 3 * K + 6
         tokens = torch.zeros(B, seq_len, n_embd, device=device)
@@ -451,7 +466,7 @@ def print_summary(all_results: Dict[str, Dict]):
         avg_frac = np.mean(fracs) * 100
         avg_imp = np.mean(imps)
 
-        status = "✓" if avg_frac >= 50 else "✗"
+        status = "PASS" if avg_frac >= 50 else "FAIL"
         print(f"\n{approach}:")
         print(f"  {status} Avg fraction improved: {avg_frac:.1f}%")
         print(f"    Avg improvement ratio: {avg_imp:.2f}x")
