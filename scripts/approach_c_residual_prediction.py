@@ -1,0 +1,415 @@
+"""
+Approach C: Residual Prediction
+
+Train the model to predict corrections/residuals instead of direct solutions:
+1. First pass: x_0 = model(context, query) [standard ICL]
+2. Subsequent passes: Δx = model(context, query, x_current) [predict correction]
+3. Update: x_new = x_current + Δx
+
+The model learns to output residuals when given the current estimate as part of input.
+We encode the current estimate using a special "ESTIMATE" role embedding.
+
+Usage:
+    python scripts/approach_c_residual_prediction.py
+"""
+
+import torch
+import torch.nn.functional as F
+from torch.optim import Adam
+import json
+from pathlib import Path
+from dataclasses import dataclass, asdict
+from typing import Dict, List, Tuple
+import time
+import numpy as np
+
+import sys
+_src_dir = Path(__file__).parent.parent / "src"
+if str(_src_dir) not in sys.path:
+    sys.path.insert(0, str(_src_dir))
+
+from curriculum_model.component_model import (
+    ComponentTransformerModel,
+    ComponentModelConfig,
+)
+from curriculum_model.roles import Role
+
+
+@dataclass
+class Config:
+    # Model
+    d: int = 4
+    n_embd: int = 128
+    n_layer: int = 6
+    n_head: int = 4
+
+    # Training
+    training_steps: int = 50000
+    batch_size: int = 64
+    lr: float = 1e-4
+    warmup_steps: int = 1000
+    weight_decay: float = 1e-5
+    max_grad_norm: float = 1.0
+
+    # Residual training
+    train_iterations: int = 3
+    residual_weight: float = 0.5  # Mix of direct prediction and residual training
+
+    # Data
+    num_context: int = 5
+    kappa_min: float = 1.0
+    kappa_max: float = 100.0
+
+    # Testing
+    test_iterations: int = 5
+    test_batches: int = 50
+    kappa_ranges: List[Tuple[float, float]] = None
+
+    # Output
+    output_dir: str = "experiment_results/approach_c"
+    device: str = "cuda"
+    log_every: int = 500
+
+    def __post_init__(self):
+        if self.kappa_ranges is None:
+            self.kappa_ranges = [(1, 10), (10, 50), (50, 100), (100, 200)]
+
+
+class ResidualTrainer:
+    """Trains model to predict residuals/corrections."""
+
+    def __init__(self, model: ComponentTransformerModel, config: Config, device: torch.device):
+        self.model = model
+        self.config = config
+        self.device = device
+        self.d = config.d
+
+        # Role embeddings (detached to avoid graph accumulation)
+        role_emb = model.role_embedding
+        with torch.no_grad():
+            self._matrix_role = role_emb(torch.tensor(Role.MATRIX.value, device=device)).detach()
+            self._bias_role = role_emb(torch.tensor(Role.VEC_BIAS.value, device=device)).detach()
+            self._output_role = role_emb(torch.tensor(Role.OUTPUT.value, device=device)).detach()
+            # Use VEC_SECONDARY for current estimate (different from output)
+            self._estimate_role = role_emb(torch.tensor(Role.VEC_SECONDARY.value, device=device)).detach()
+
+    def sample_spd(self, B: int, kappa_min: float, kappa_max: float) -> torch.Tensor:
+        d, device = self.d, self.device
+        log_min, log_max = np.log(kappa_min), np.log(kappa_max)
+
+        u = torch.rand(B, device=device)
+        kappas = torch.exp(torch.tensor(log_min, device=device) + u * (log_max - log_min))
+
+        u_eigs = torch.rand(B, d, device=device)
+        eigs = torch.exp(u_eigs * kappas.unsqueeze(-1).log())
+
+        G = torch.randn(B, d, d, device=device)
+        Q, _ = torch.linalg.qr(G)
+        A = Q @ torch.diag_embed(eigs) @ Q.transpose(-2, -1)
+        return 0.5 * (A + A.transpose(-2, -1))
+
+    def build_tokens_standard(
+        self, A: torch.Tensor, b_ctx: torch.Tensor, x_ctx: torch.Tensor, b_query: torch.Tensor
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Standard ICL tokens without current estimate."""
+        B, K = b_ctx.shape[:2]
+        d, device = self.d, self.device
+
+        embedders = self.model.embedders
+        special = self.model.special_tokens
+
+        A_emb = embedders.matrix(A) + self._matrix_role
+        b_flat = b_ctx.reshape(B * K, d)
+        x_flat = x_ctx.reshape(B * K, d)
+        n_embd = embedders.vector(b_flat).shape[-1]
+
+        b_emb = embedders.vector(b_flat).reshape(B, K, n_embd) + self._bias_role
+        x_emb = embedders.vector(x_flat).reshape(B, K, n_embd) + self._output_role
+        b_q_emb = embedders.vector(b_query) + self._bias_role
+
+        seq_len = 3 * K + 5
+        tokens = torch.zeros(B, seq_len, n_embd, device=device)
+        ex_pos = torch.zeros(B, seq_len, dtype=torch.long, device=device)
+
+        sep, mask = special.get_sep_batch(B), special.get_mask_batch(B)
+        tokens[:, 0], tokens[:, 1] = sep, A_emb
+
+        for i in range(K):
+            idx = 2 + i * 3
+            tokens[:, idx] = sep
+            tokens[:, idx + 1] = b_emb[:, i]
+            tokens[:, idx + 2] = x_emb[:, i]
+            ex_pos[:, idx:idx + 3] = i + 1
+
+        q_idx = 2 + K * 3
+        tokens[:, q_idx] = sep
+        tokens[:, q_idx + 1] = b_q_emb
+        tokens[:, q_idx + 2] = mask
+        ex_pos[:, q_idx:q_idx + 3] = K + 1
+
+        return tokens, ex_pos, torch.full((B,), seq_len - 1, dtype=torch.long, device=device)
+
+    def build_tokens_with_estimate(
+        self, A: torch.Tensor, b_ctx: torch.Tensor, x_ctx: torch.Tensor,
+        b_query: torch.Tensor, x_estimate: torch.Tensor
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """
+        Tokens with current estimate included.
+        Format: [SEP, A, SEP, b_0, x_0, ..., SEP, b_query, x_estimate, MASK]
+        The model should output the RESIDUAL (correction) at MASK position.
+        """
+        B, K = b_ctx.shape[:2]
+        d, device = self.d, self.device
+
+        embedders = self.model.embedders
+        special = self.model.special_tokens
+
+        A_emb = embedders.matrix(A) + self._matrix_role
+        b_flat = b_ctx.reshape(B * K, d)
+        x_flat = x_ctx.reshape(B * K, d)
+        n_embd = embedders.vector(b_flat).shape[-1]
+
+        b_emb = embedders.vector(b_flat).reshape(B, K, n_embd) + self._bias_role
+        x_emb = embedders.vector(x_flat).reshape(B, K, n_embd) + self._output_role
+        b_q_emb = embedders.vector(b_query) + self._bias_role
+        x_est_emb = embedders.vector(x_estimate) + self._estimate_role  # Different role!
+
+        # Longer sequence: includes estimate before MASK
+        seq_len = 3 * K + 6
+        tokens = torch.zeros(B, seq_len, n_embd, device=device)
+        ex_pos = torch.zeros(B, seq_len, dtype=torch.long, device=device)
+
+        sep, mask = special.get_sep_batch(B), special.get_mask_batch(B)
+        tokens[:, 0], tokens[:, 1] = sep, A_emb
+
+        for i in range(K):
+            idx = 2 + i * 3
+            tokens[:, idx] = sep
+            tokens[:, idx + 1] = b_emb[:, i]
+            tokens[:, idx + 2] = x_emb[:, i]
+            ex_pos[:, idx:idx + 3] = i + 1
+
+        q_idx = 2 + K * 3
+        tokens[:, q_idx] = sep
+        tokens[:, q_idx + 1] = b_q_emb
+        tokens[:, q_idx + 2] = x_est_emb  # Current estimate
+        tokens[:, q_idx + 3] = mask       # Predict residual here
+        ex_pos[:, q_idx:q_idx + 4] = K + 1
+
+        return tokens, ex_pos, torch.full((B,), seq_len - 1, dtype=torch.long, device=device)
+
+    def training_step(self, optimizer: Adam) -> Dict[str, float]:
+        """One training step mixing direct and residual prediction."""
+        B, K, d = self.config.batch_size, self.config.num_context, self.d
+        device = self.device
+
+        # Generate problem
+        A = self.sample_spd(B, self.config.kappa_min, self.config.kappa_max)
+        b_all = torch.randn(B, K + 1, d, device=device)
+        x_all = torch.linalg.solve(A, b_all.transpose(-2, -1)).transpose(-2, -1)
+
+        b_ctx = b_all[:, :K]
+        x_ctx = x_all[:, :K]
+        b_query = b_all[:, K]
+        x_target = x_all[:, K]
+
+        total_loss = 0.0
+        losses = {}
+
+        # Part 1: Standard direct prediction (iteration 0)
+        tokens, ex_pos, mask_pos = self.build_tokens_standard(A, b_ctx, x_ctx, b_query)
+        output = self.model(tokens, ex_pos, mask_pos)
+        pred_0 = output.vector_output
+        loss_direct = F.mse_loss(pred_0, x_target)
+        total_loss = total_loss + (1 - self.config.residual_weight) * loss_direct
+        losses["direct"] = loss_direct.item()
+
+        # Part 2: Residual prediction training
+        # Create noisy estimates and train to predict the residual
+        with torch.no_grad():
+            # Use prediction + noise as "current estimate"
+            noise_scale = torch.rand(B, 1, device=device) * 0.5  # Random noise level
+            x_estimate = pred_0.detach() + torch.randn_like(pred_0) * noise_scale
+            true_residual = x_target - x_estimate
+
+        tokens_r, ex_pos_r, mask_pos_r = self.build_tokens_with_estimate(
+            A, b_ctx, x_ctx, b_query, x_estimate
+        )
+        output_r = self.model(tokens_r, ex_pos_r, mask_pos_r)
+        pred_residual = output_r.vector_output
+
+        loss_residual = F.mse_loss(pred_residual, true_residual)
+        total_loss = total_loss + self.config.residual_weight * loss_residual
+        losses["residual"] = loss_residual.item()
+
+        optimizer.zero_grad()
+        total_loss.backward()
+        torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.config.max_grad_norm)
+        optimizer.step()
+
+        losses["total"] = total_loss.item()
+        return losses
+
+
+def train(config: Config) -> Tuple[ComponentTransformerModel, List[Dict]]:
+    device = torch.device(config.device)
+
+    print(f"\n{'='*60}")
+    print("APPROACH C: RESIDUAL PREDICTION TRAINING")
+    print(f"{'='*60}")
+    print(f"Residual weight: {config.residual_weight}")
+
+    model_config = ComponentModelConfig(
+        d=config.d, n_embd=config.n_embd, n_layer=config.n_layer, n_head=config.n_head,
+        n_positions=128, max_examples=64, dropout=0.0
+    )
+    model = ComponentTransformerModel(model_config).to(device)
+    optimizer = Adam(model.parameters(), lr=config.lr, weight_decay=config.weight_decay)
+
+    def lr_lambda(step):
+        if step < config.warmup_steps:
+            return step / config.warmup_steps
+        progress = (step - config.warmup_steps) / (config.training_steps - config.warmup_steps)
+        return 0.5 * (1 + np.cos(np.pi * progress))
+    scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
+
+    trainer = ResidualTrainer(model, config, device)
+    history = []
+    start_time = time.time()
+
+    model.train()
+    for step in range(config.training_steps):
+        losses = trainer.training_step(optimizer)
+        scheduler.step()
+
+        if step % config.log_every == 0:
+            elapsed = time.time() - start_time
+            print(f"Step {step:5d} | Total: {losses['total']:.6f} | "
+                  f"Direct: {losses['direct']:.6f} | Residual: {losses['residual']:.6f} | "
+                  f"Time: {elapsed:.1f}s")
+            history.append({"step": step, **losses})
+
+    print(f"\nTraining complete in {time.time() - start_time:.1f}s")
+    return model, history
+
+
+def test(model: ComponentTransformerModel, config: Config) -> Dict:
+    device = torch.device(config.device)
+    model.eval()
+
+    print(f"\n{'='*60}")
+    print("TESTING RESIDUAL REFINEMENT")
+    print(f"{'='*60}")
+
+    trainer = ResidualTrainer(model, config, device)
+    results = {}
+
+    for kappa_min, kappa_max in config.kappa_ranges:
+        kappa_key = f"{kappa_min}-{kappa_max}"
+        print(f"\nκ ∈ [{kappa_min}, {kappa_max}]")
+
+        all_mse = {i: [] for i in range(config.test_iterations)}
+        improvements = []
+
+        for _ in range(config.test_batches):
+            B, K, d = config.batch_size, config.num_context, config.d
+
+            with torch.no_grad():
+                A = trainer.sample_spd(B, kappa_min, kappa_max)
+                b_all = torch.randn(B, K + 1, d, device=device)
+                x_all = torch.linalg.solve(A, b_all.transpose(-2, -1)).transpose(-2, -1)
+
+                b_ctx = b_all[:, :K]
+                x_ctx = x_all[:, :K]
+                b_query, x_target = b_all[:, K], x_all[:, K]
+
+                mse_history = []
+
+                # Iteration 0: Direct prediction
+                tokens, ex_pos, mask_pos = trainer.build_tokens_standard(A, b_ctx, x_ctx, b_query)
+                x_current = model(tokens, ex_pos, mask_pos).vector_output
+                mse = F.mse_loss(x_current, x_target).item()
+                mse_history.append(mse)
+                all_mse[0].append(mse)
+
+                # Iterations 1+: Residual refinement
+                for i in range(1, config.test_iterations):
+                    tokens_r, ex_pos_r, mask_pos_r = trainer.build_tokens_with_estimate(
+                        A, b_ctx, x_ctx, b_query, x_current
+                    )
+                    residual = model(tokens_r, ex_pos_r, mask_pos_r).vector_output
+                    x_current = x_current + residual  # Apply correction
+
+                    mse = F.mse_loss(x_current, x_target).item()
+                    mse_history.append(mse)
+                    all_mse[i].append(mse)
+
+                improvements.append(mse_history[0] / mse_history[-1] if mse_history[-1] > 0 else 0)
+
+        # Summary
+        mse_summary = {i: {"mean": np.mean(m), "std": np.std(m)} for i, m in all_mse.items()}
+        improved_frac = sum(1 for imp in improvements if imp > 1) / len(improvements)
+
+        results[kappa_key] = {
+            "mse_by_iteration": mse_summary,
+            "improvement_ratio": {"mean": np.mean(improvements), "std": np.std(improvements)},
+            "improved_fraction": improved_frac,
+        }
+
+        print(f"  MSE: {mse_summary[0]['mean']:.6f} → {mse_summary[config.test_iterations-1]['mean']:.6f}")
+        print(f"  Improvement: {np.mean(improvements):.2f}x, Fraction improved: {improved_frac*100:.1f}%")
+
+    return results
+
+
+def main():
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--training_steps", type=int, default=50000)
+    parser.add_argument("--residual_weight", type=float, default=0.5)
+    parser.add_argument("--test_iterations", type=int, default=5)
+    parser.add_argument("--output_dir", type=str, default="experiment_results/approach_c")
+    parser.add_argument("--device", type=str, default="cuda")
+    args = parser.parse_args()
+
+    config = Config(
+        training_steps=args.training_steps,
+        residual_weight=args.residual_weight,
+        test_iterations=args.test_iterations,
+        output_dir=args.output_dir,
+        device=args.device,
+    )
+
+    output_dir = Path(config.output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    # Train
+    model, train_history = train(config)
+
+    # Save model
+    torch.save(model.state_dict(), output_dir / "model.pt")
+
+    # Test
+    test_results = test(model, config)
+
+    # Print summary
+    print(f"\n{'='*60}")
+    print("SUMMARY")
+    print(f"{'='*60}")
+    all_fracs = [r["improved_fraction"] for r in test_results.values()]
+    avg_frac = np.mean(all_fracs)
+    if avg_frac >= 0.5:
+        print(f"✓ SUCCESS: {avg_frac*100:.1f}% of samples improved (≥50%)")
+    else:
+        print(f"✗ BELOW THRESHOLD: {avg_frac*100:.1f}% of samples improved (<50%)")
+
+    # Save results
+    results = {"config": asdict(config), "training": train_history, "testing": test_results}
+    with open(output_dir / "results.json", "w") as f:
+        json.dump(results, f, indent=2, default=str)
+
+    print(f"\nResults saved to {output_dir}")
+
+
+if __name__ == "__main__":
+    main()
