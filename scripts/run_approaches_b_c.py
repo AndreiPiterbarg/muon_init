@@ -59,6 +59,11 @@ class Config:
     # Approach C config
     c_residual_weight: float = 0.5
 
+    # Fair comparison: baseline gets more steps to match compute
+    # Approach B does 3 forward passes/step, Approach C does 2
+    # Baseline multiplier compensates for this
+    baseline_step_multiplier: int = 2  # baseline trains for 2x steps
+
     # Data
     num_context: int = 5
     kappa_min: float = 1.0
@@ -204,19 +209,31 @@ class TokenBuilder:
 # =============================================================================
 
 def train_baseline(config: Config, device: torch.device) -> ComponentTransformerModel:
+    # Baseline gets more steps to match compute of iterative approaches
+    total_steps = config.training_steps * config.baseline_step_multiplier
+
     print(f"\n{'='*60}")
     print("TRAINING: BASELINE (Standard ICL)")
+    print(f"Steps: {total_steps} ({config.baseline_step_multiplier}x for fair compute)")
     print(f"{'='*60}")
 
     model = create_model(config, device)
     optimizer = Adam(model.parameters(), lr=config.lr, weight_decay=config.weight_decay)
-    scheduler = create_scheduler(optimizer, config)
+
+    # Adjust scheduler for longer training
+    def lr_lambda(step):
+        if step < config.warmup_steps:
+            return step / config.warmup_steps
+        progress = (step - config.warmup_steps) / (total_steps - config.warmup_steps)
+        return 0.5 * (1 + np.cos(np.pi * progress))
+    scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
+
     builder = TokenBuilder(model, config.d, device)
 
     model.train()
     start = time.time()
 
-    for step in range(config.training_steps):
+    for step in range(total_steps):
         B, K, d = config.batch_size, config.num_context, config.d
         A = sample_spd(B, d, device, config.kappa_min, config.kappa_max)
         b_all = torch.randn(B, K + 1, d, device=device)
@@ -234,10 +251,11 @@ def train_baseline(config: Config, device: torch.device) -> ComponentTransformer
         optimizer.step()
         scheduler.step()
 
-        if step % config.log_every == 0:
-            print(f"Step {step:5d} | Loss: {loss.item():.6f} | Time: {time.time()-start:.1f}s")
+        log_every = config.log_every * config.baseline_step_multiplier
+        if step % log_every == 0:
+            print(f"Step {step:5d}/{total_steps} | Loss: {loss.item():.6f} | Time: {time.time()-start:.1f}s")
 
-    print(f"Baseline training complete in {time.time()-start:.1f}s")
+    print(f"Baseline training complete ({total_steps} steps) in {time.time()-start:.1f}s")
     return model
 
 

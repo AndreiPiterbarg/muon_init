@@ -54,11 +54,16 @@ class Config:
     # Residual training
     train_iterations: int = 3
     residual_weight: float = 0.5  # Mix of direct prediction and residual training
+    noise_scale: float = 0.5  # Noise level for estimate perturbation
 
     # Data
     num_context: int = 5
     kappa_min: float = 1.0
     kappa_max: float = 100.0
+
+    # Curriculum training
+    curriculum: bool = False
+    curriculum_warmup: int = 10000  # Steps before starting curriculum
 
     # Testing
     test_iterations: int = 5
@@ -83,6 +88,7 @@ class ResidualTrainer:
         self.config = config
         self.device = device
         self.d = config.d
+        self.current_step = 0
 
         # Cache role indices (not embeddings) for efficient lookup
         self._role_indices = {
@@ -95,6 +101,25 @@ class ResidualTrainer:
     def _get_role(self, name: str) -> torch.Tensor:
         """Get role embedding (with gradient flow)."""
         return self.model.role_embedding(self._role_indices[name])
+
+    def get_kappa_range(self, step: int) -> Tuple[float, float]:
+        """Get kappa range based on training progress (curriculum learning)."""
+        if not self.config.curriculum:
+            return self.config.kappa_min, self.config.kappa_max
+
+        # Warmup: use easy problems only
+        if step < self.config.curriculum_warmup:
+            return 1.0, 10.0
+
+        # Curriculum: gradually increase difficulty
+        progress = (step - self.config.curriculum_warmup) / (
+            self.config.training_steps - self.config.curriculum_warmup
+        )
+        progress = min(progress, 1.0)
+
+        # Interpolate kappa_max: 10 → 200
+        kappa_max = 10.0 + progress * 190.0
+        return 1.0, kappa_max
 
     def sample_spd(self, B: int, kappa_min: float, kappa_max: float) -> torch.Tensor:
         d, device = self.d, self.device
@@ -217,8 +242,10 @@ class ResidualTrainer:
         B, K, d = self.config.batch_size, self.config.num_context, self.d
         device = self.device
 
-        # Generate problem
-        A = self.sample_spd(B, self.config.kappa_min, self.config.kappa_max)
+        # Generate problem (use curriculum if enabled)
+        kappa_min, kappa_max = self.get_kappa_range(self.current_step)
+        A = self.sample_spd(B, kappa_min, kappa_max)
+        self.current_step += 1
         b_all = torch.randn(B, K + 1, d, device=device)
         x_all = torch.linalg.solve(A, b_all.transpose(-2, -1)).transpose(-2, -1)
 
@@ -238,23 +265,26 @@ class ResidualTrainer:
         total_loss = total_loss + (1 - self.config.residual_weight) * loss_direct
         losses["direct"] = loss_direct.item()
 
-        # Part 2: Residual prediction training
-        # Create noisy estimates and train to predict the residual
-        with torch.no_grad():
-            # Use prediction + noise as "current estimate"
-            noise_scale = torch.rand(B, 1, device=device) * 0.5  # Random noise level
-            x_estimate = pred_0.detach() + torch.randn_like(pred_0) * noise_scale
-            true_residual = x_target - x_estimate
+        # Part 2: Residual prediction training (skip if residual_weight=0 for fair compute)
+        if self.config.residual_weight > 0:
+            # Create noisy estimates and train to predict the residual
+            with torch.no_grad():
+                # Use prediction + noise as "current estimate"
+                noise_scale = torch.rand(B, 1, device=device) * self.config.noise_scale
+                x_estimate = pred_0.detach() + torch.randn_like(pred_0) * noise_scale
+                true_residual = x_target - x_estimate
 
-        tokens_r, ex_pos_r, mask_pos_r = self.build_tokens_with_estimate(
-            A, b_ctx, x_ctx, b_query, x_estimate
-        )
-        output_r = self.model(tokens_r, ex_pos_r, mask_pos_r)
-        pred_residual = output_r.vector_output
+            tokens_r, ex_pos_r, mask_pos_r = self.build_tokens_with_estimate(
+                A, b_ctx, x_ctx, b_query, x_estimate
+            )
+            output_r = self.model(tokens_r, ex_pos_r, mask_pos_r)
+            pred_residual = output_r.vector_output
 
-        loss_residual = F.mse_loss(pred_residual, true_residual)
-        total_loss = total_loss + self.config.residual_weight * loss_residual
-        losses["residual"] = loss_residual.item()
+            loss_residual = F.mse_loss(pred_residual, true_residual)
+            total_loss = total_loss + self.config.residual_weight * loss_residual
+            losses["residual"] = loss_residual.item()
+        else:
+            losses["residual"] = 0.0
 
         optimizer.zero_grad()
         total_loss.backward()
@@ -379,9 +409,26 @@ def test(model: ComponentTransformerModel, config: Config) -> Dict:
 def main():
     import argparse
     parser = argparse.ArgumentParser()
+    # Training
     parser.add_argument("--training_steps", type=int, default=50000)
     parser.add_argument("--residual_weight", type=float, default=0.5)
+    parser.add_argument("--lr", type=float, default=1e-4)
+    parser.add_argument("--noise_scale", type=float, default=0.5)
+    # Model architecture
+    parser.add_argument("--n_layer", type=int, default=6)
+    parser.add_argument("--n_embd", type=int, default=128)
+    parser.add_argument("--n_head", type=int, default=4)
+    # Data / kappa range
+    parser.add_argument("--kappa_min", type=float, default=1.0)
+    parser.add_argument("--kappa_max", type=float, default=100.0)
+    # Curriculum
+    parser.add_argument("--curriculum", action="store_true")
+    parser.add_argument("--curriculum_warmup", type=int, default=10000)
+    # Testing
     parser.add_argument("--test_iterations", type=int, default=5)
+    parser.add_argument("--test_only", action="store_true")
+    parser.add_argument("--model_path", type=str, default=None)
+    # Output
     parser.add_argument("--output_dir", type=str, default="experiment_results/approach_c")
     parser.add_argument("--device", type=str, default="cuda")
     args = parser.parse_args()
@@ -392,10 +439,46 @@ def main():
         test_iterations=args.test_iterations,
         output_dir=args.output_dir,
         device=args.device,
+        n_layer=args.n_layer,
+        n_embd=args.n_embd,
+        n_head=args.n_head,
+        lr=args.lr,
+        kappa_min=args.kappa_min,
+        kappa_max=args.kappa_max,
+        noise_scale=args.noise_scale,
+        curriculum=args.curriculum,
+        curriculum_warmup=args.curriculum_warmup,
     )
 
     output_dir = Path(config.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
+    device = torch.device(config.device)
+
+    # Test-only mode: load existing model and run evaluation
+    if args.test_only:
+        model_path = args.model_path
+        if model_path is None:
+            model_path = output_dir / "model.pt"
+        else:
+            model_path = Path(model_path)
+
+        print(f"Loading model from {model_path}")
+        model_config = ComponentModelConfig(
+            d=config.d, n_embd=config.n_embd, n_layer=config.n_layer, n_head=config.n_head,
+            n_positions=128, max_examples=64, dropout=0.0
+        )
+        model = ComponentTransformerModel(model_config).to(device)
+        model.load_state_dict(torch.load(model_path, map_location=device, weights_only=True))
+
+        test_results = test(model, config)
+
+        # Save test results
+        results = {"config": asdict(config), "testing": test_results}
+        with open(output_dir / "test_results.json", "w") as f:
+            json.dump(results, f, indent=2, default=str)
+
+        print(f"\nTest results saved to {output_dir / 'test_results.json'}")
+        return
 
     # Train
     model, train_history = train(config)
