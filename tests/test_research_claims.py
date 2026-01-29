@@ -1,7 +1,7 @@
 """Statistical validation tests for research claims.
 
 These tests verify the paper's main claims with proper statistical rigor:
-1. Approach C enables iterative refinement (MSE decreases)
+1. Role-Disambiguated Residual enables iterative refinement (MSE decreases)
 2. Improvement fraction is in claimed range [0.64, 0.86]
 3. Baseline shows no improvement with iterations
 
@@ -199,10 +199,10 @@ class RefnementEvaluator:
 
 @pytest.fixture
 def trained_model(device):
-    """Load trained Approach C model or skip if not available."""
-    model_path = Path(__file__).parent.parent / "experiment_results" / "approach_c" / "model.pt"
+    """Load trained Role-Disambiguated Residual model or skip if not available."""
+    model_path = Path(__file__).parent.parent / "experiment_results" / "role_disambiguated_residual" / "model.pt"
     if not model_path.exists():
-        pytest.skip("Trained model not found. Run scripts/approach_c_residual_prediction.py first.")
+        pytest.skip("Trained model not found. Run scripts/role_disambiguated_residual_prediction.py first.")
 
     config = ComponentModelConfig(
         d=4, n_embd=128, n_layer=6, n_head=4,
@@ -214,7 +214,7 @@ def trained_model(device):
 
 
 class TestResearchClaim1:
-    """Claim: Approach C enables iterative refinement (MSE decreases with iterations)."""
+    """Claim: Role-Disambiguated Residual enables iterative refinement (MSE decreases with iterations)."""
 
     def test_mse_decreases_with_iterations(self, trained_model, device):
         """Statistical test: MSE at iteration 0 > MSE at final iteration."""

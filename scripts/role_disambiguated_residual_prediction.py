@@ -1,5 +1,5 @@
 """
-Approach C: Residual Prediction
+Role-Disambiguated Residual Prediction
 
 Train the model to predict corrections/residuals instead of direct solutions:
 1. First pass: x_0 = model(context, query) [standard ICL]
@@ -10,7 +10,7 @@ The model learns to output residuals when given the current estimate as part of 
 We encode the current estimate using a special "ESTIMATE" role embedding.
 
 Usage:
-    python scripts/approach_c_residual_prediction.py
+    python scripts/role_disambiguated_residual_prediction.py
 """
 
 import torch
@@ -54,7 +54,7 @@ class Config:
     # Residual training
     train_iterations: int = 3
     residual_weight: float = 0.5  # Mix of direct prediction and residual training
-    noise_scale: float = 0.5  # Noise level for estimate perturbation
+    unroll_warmup: int = 15000    # Steps before reaching full unroll depth
 
     # Data
     num_context: int = 5
@@ -71,7 +71,7 @@ class Config:
     kappa_ranges: List[Tuple[float, float]] = None
 
     # Output
-    output_dir: str = "experiment_results/approach_c"
+    output_dir: str = "experiment_results/role_disambiguated_residual"
     device: str = "cuda"
     log_every: int = 500
 
@@ -265,22 +265,27 @@ class ResidualTrainer:
         total_loss = total_loss + (1 - self.config.residual_weight) * loss_direct
         losses["direct"] = loss_direct.item()
 
-        # Part 2: Residual prediction training (skip if residual_weight=0 for fair compute)
+        # Part 2: Unrolled multi-step residual refinement with curriculum
         if self.config.residual_weight > 0:
-            # Create noisy estimates and train to predict the residual
-            with torch.no_grad():
-                # Use prediction + noise as "current estimate"
-                noise_scale = torch.rand(B, 1, device=device) * self.config.noise_scale
-                x_estimate = pred_0.detach() + torch.randn_like(pred_0) * noise_scale
-                true_residual = x_target - x_estimate
+            if self.current_step < self.config.unroll_warmup:
+                progress = self.current_step / self.config.unroll_warmup
+                num_steps = 1 + int(progress * (self.config.train_iterations - 1))
+            else:
+                num_steps = self.config.train_iterations
 
-            tokens_r, ex_pos_r, mask_pos_r = self.build_tokens_with_estimate(
-                A, b_ctx, x_ctx, b_query, x_estimate
-            )
-            output_r = self.model(tokens_r, ex_pos_r, mask_pos_r)
-            pred_residual = output_r.vector_output
+            x_current = pred_0.detach()
+            loss_residual = 0.0
 
-            loss_residual = F.mse_loss(pred_residual, true_residual)
+            for _k in range(num_steps):
+                true_residual = x_target - x_current
+                tokens_r, ex_pos_r, mask_pos_r = self.build_tokens_with_estimate(
+                    A, b_ctx, x_ctx, b_query, x_current
+                )
+                pred_residual = self.model(tokens_r, ex_pos_r, mask_pos_r).vector_output
+                loss_residual = loss_residual + F.mse_loss(pred_residual, true_residual)
+                x_current = (x_current + pred_residual).detach()
+
+            loss_residual = loss_residual / num_steps
             total_loss = total_loss + self.config.residual_weight * loss_residual
             losses["residual"] = loss_residual.item()
         else:
@@ -299,7 +304,7 @@ def train(config: Config) -> Tuple[ComponentTransformerModel, List[Dict]]:
     device = torch.device(config.device)
 
     print(f"\n{'='*60}")
-    print("APPROACH C: RESIDUAL PREDICTION TRAINING")
+    print("ROLE-DISAMBIGUATED RESIDUAL: RESIDUAL PREDICTION TRAINING")
     print(f"{'='*60}")
     print(f"Residual weight: {config.residual_weight}")
 
@@ -413,7 +418,7 @@ def main():
     parser.add_argument("--training_steps", type=int, default=50000)
     parser.add_argument("--residual_weight", type=float, default=0.5)
     parser.add_argument("--lr", type=float, default=1e-4)
-    parser.add_argument("--noise_scale", type=float, default=0.5)
+    parser.add_argument("--train_iterations", type=int, default=3)
     # Model architecture
     parser.add_argument("--n_layer", type=int, default=6)
     parser.add_argument("--n_embd", type=int, default=128)
@@ -429,7 +434,7 @@ def main():
     parser.add_argument("--test_only", action="store_true")
     parser.add_argument("--model_path", type=str, default=None)
     # Output
-    parser.add_argument("--output_dir", type=str, default="experiment_results/approach_c")
+    parser.add_argument("--output_dir", type=str, default="experiment_results/role_disambiguated_residual")
     parser.add_argument("--device", type=str, default="cuda")
     args = parser.parse_args()
 
@@ -445,7 +450,7 @@ def main():
         lr=args.lr,
         kappa_min=args.kappa_min,
         kappa_max=args.kappa_max,
-        noise_scale=args.noise_scale,
+        train_iterations=args.train_iterations,
         curriculum=args.curriculum,
         curriculum_warmup=args.curriculum_warmup,
     )

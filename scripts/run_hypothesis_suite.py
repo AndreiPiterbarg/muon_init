@@ -13,7 +13,7 @@ Hypotheses tested:
     H1: Higher residual_weight improves refinement (0.3 vs 0.5 vs 0.7)
     H2: Deeper models improve performance (n_layer: 4, 6, 8)
     H3: Wider models improve performance (n_embd: 64, 128, 256)
-    H4: Higher noise during training improves generalization (noise_scale: 0.25, 0.5, 1.0)
+    H4: More unrolled training iterations improve convergence (train_iterations: 1, 3, 5)
     H5: Curriculum training improves hard problem performance
     H6: More test iterations continue to improve results (5, 10, 15)
     H7: Learning rate affects convergence (5e-5, 1e-4, 2e-4)
@@ -43,7 +43,7 @@ class ExperimentConfig:
     n_embd: int = 128
     n_head: int = 4
     lr: float = 1e-4
-    noise_scale: float = 0.5
+    train_iterations: int = 3
     kappa_min: float = 1.0
     kappa_max: float = 100.0
     curriculum: bool = False
@@ -59,7 +59,7 @@ class ExperimentConfig:
             "--n_embd", str(self.n_embd),
             "--n_head", str(self.n_head),
             "--lr", str(self.lr),
-            "--noise_scale", str(self.noise_scale),
+            "--train_iterations", str(self.train_iterations),
             "--kappa_min", str(self.kappa_min),
             "--kappa_max", str(self.kappa_max),
             "--test_iterations", str(self.test_iterations),
@@ -106,14 +106,14 @@ def define_experiments() -> List[ExperimentConfig]:
         training_steps=100000,  # 2x steps for equal compute (1 vs 2 forward passes)
     ))
 
-    # Approach C default (residual prediction with default settings)
+    # Role-Disambiguated Residual default (residual prediction with default settings)
     experiments.append(ExperimentConfig(
-        name="approach_c_default",
-        hypothesis="approach_c",
+        name="rdr_default",
+        hypothesis="role_disambiguated_residual",
     ))
 
     # H1: Residual weight sweep
-    for rw in [0.3, 0.7]:  # 0.5 is approach_c_default
+    for rw in [0.3, 0.7]:  # 0.5 is rdr_default
         experiments.append(ExperimentConfig(
             name=f"rw_{rw}",
             hypothesis="H1_residual_weight",
@@ -139,12 +139,12 @@ def define_experiments() -> List[ExperimentConfig]:
             n_head=n_head,
         ))
 
-    # H4: Noise scale
-    for noise in [0.25, 1.0]:  # 0.5 is baseline
+    # H4: Unrolled training iterations
+    for iters in [1, 5]:  # 3 is baseline
         experiments.append(ExperimentConfig(
-            name=f"noise_{noise}",
-            hypothesis="H4_noise_scale",
-            noise_scale=noise,
+            name=f"train_iters_{iters}",
+            hypothesis="H4_train_iterations",
+            train_iterations=iters,
         ))
 
     # H5: Curriculum learning
@@ -296,7 +296,7 @@ class HypothesisSuite:
         print(f"{'='*60}")
 
         # Build command
-        script_path = Path(__file__).parent / "approach_c_residual_prediction.py"
+        script_path = Path(__file__).parent / "role_disambiguated_residual_prediction.py"
         cmd = [
             sys.executable, str(script_path)
         ] + config.to_cli_args(str(output_dir), self.device)
@@ -390,22 +390,22 @@ class HypothesisSuite:
 
     def run_extended_iteration_tests(self):
         """Run extended iteration tests on completed models (H6)."""
-        # Define extended iteration tests (test more refinement iterations on Approach C)
+        # Define extended iteration tests (test more refinement iterations on Role-Disambiguated Residual)
         extended_configs = [
-            ExtendedIterationTest(name="approach_c_iter10", test_iterations=10, model_name="approach_c_default"),
-            ExtendedIterationTest(name="approach_c_iter15", test_iterations=15, model_name="approach_c_default"),
-            ExtendedIterationTest(name="approach_c_iter20", test_iterations=20, model_name="approach_c_default"),
+            ExtendedIterationTest(name="role_disambiguated_residual_iter10", test_iterations=10, model_name="rdr_default"),
+            ExtendedIterationTest(name="role_disambiguated_residual_iter15", test_iterations=15, model_name="rdr_default"),
+            ExtendedIterationTest(name="role_disambiguated_residual_iter20", test_iterations=20, model_name="rdr_default"),
         ]
 
-        # Find approach_c_default model
+        # Find rdr_default model
         baseline_result = None
         for result in self.experiments.values():
-            if result.config.name == "approach_c_default" and result.status == "completed":
+            if result.config.name == "rdr_default" and result.status == "completed":
                 baseline_result = result
                 break
 
         if baseline_result is None:
-            print("approach_c_default not completed yet, skipping extended iteration tests")
+            print("rdr_default not completed yet, skipping extended iteration tests")
             return
 
         model_path = Path(baseline_result.results_path) / "model.pt"
@@ -431,7 +431,7 @@ class HypothesisSuite:
             output_dir.mkdir(parents=True, exist_ok=True)
 
             # Run test-only mode
-            script_path = Path(__file__).parent / "approach_c_residual_prediction.py"
+            script_path = Path(__file__).parent / "role_disambiguated_residual_prediction.py"
             cmd = [
                 sys.executable, str(script_path),
                 "--test_only",
@@ -500,33 +500,33 @@ class HypothesisSuite:
             "recommendations": [],
         }
 
-        # Get approach_c_default as reference for hyperparameter comparisons
-        approach_c_ref = None
+        # Get rdr_default as reference for hyperparameter comparisons
+        role_disambiguated_residual_ref = None
         standard_icl = None
         for result in self.experiments.values():
-            if result.config.name == "approach_c_default" and result.status == "completed":
-                approach_c_ref = result
+            if result.config.name == "rdr_default" and result.status == "completed":
+                role_disambiguated_residual_ref = result
             if result.config.name == "standard_icl_baseline" and result.status == "completed":
                 standard_icl = result
 
-        if approach_c_ref is None:
-            analysis["error"] = "approach_c_default experiment not completed"
+        if role_disambiguated_residual_ref is None:
+            analysis["error"] = "rdr_default experiment not completed"
             return analysis
 
-        baseline = approach_c_ref  # Use approach_c as reference for hypothesis tests
+        baseline = role_disambiguated_residual_ref  # Use role_disambiguated_residual as reference for hypothesis tests
         baseline_frac = baseline.avg_improvement_fraction
 
-        # Report main claim: Approach C vs Standard ICL
+        # Report main claim: Role-Disambiguated Residual vs Standard ICL
         if standard_icl:
             std_frac = standard_icl.avg_improvement_fraction or 0
             analysis["main_claim"] = {
                 "standard_icl_improvement": std_frac,
-                "approach_c_improvement": baseline_frac,
-                "approach_c_advantage": baseline_frac - std_frac,
+                "role_disambiguated_residual_improvement": baseline_frac,
+                "role_disambiguated_residual_advantage": baseline_frac - std_frac,
             }
-            print(f"\nMain claim - Standard ICL: {std_frac*100:.1f}% vs Approach C: {baseline_frac*100:.1f}%")
+            print(f"\nMain claim - Standard ICL: {std_frac*100:.1f}% vs Role-Disambiguated Residual: {baseline_frac*100:.1f}%")
         else:
-            print(f"\nApproach C default improvement: {baseline_frac*100:.1f}%")
+            print(f"\nRole-Disambiguated Residual default improvement: {baseline_frac*100:.1f}%")
 
         # Group experiments by hypothesis
         by_hypothesis: Dict[str, List[ExperimentResult]] = {}
@@ -540,7 +540,7 @@ class HypothesisSuite:
 
         # Analyze each hypothesis
         for hypothesis, results in by_hypothesis.items():
-            if hypothesis in ["baseline", "approach_c"]:
+            if hypothesis in ["baseline", "role_disambiguated_residual"]:
                 continue
 
             h_analysis = self._analyze_hypothesis(hypothesis, results, baseline)
@@ -715,17 +715,17 @@ class HypothesisSuite:
         lines.append("=" * 70)
         lines.append(f"\nGenerated: {analysis['timestamp']}")
 
-        # Main claim: Approach C vs Standard ICL
+        # Main claim: Role-Disambiguated Residual vs Standard ICL
         main_claim = analysis.get("main_claim")
         if main_claim:
             lines.append("\n" + "-" * 70)
             lines.append("MAIN CLAIM: Iterative Residual Refinement vs Standard ICL")
             lines.append("-" * 70)
             std_pct = main_claim["standard_icl_improvement"] * 100
-            app_pct = main_claim["approach_c_improvement"] * 100
-            adv_pct = main_claim["approach_c_advantage"] * 100
+            app_pct = main_claim["role_disambiguated_residual_improvement"] * 100
+            adv_pct = main_claim["role_disambiguated_residual_advantage"] * 100
             lines.append(f"  Standard ICL (2x steps):  {std_pct:.1f}% samples improved after refinement")
-            lines.append(f"  Approach C (residual):    {app_pct:.1f}% samples improved after refinement")
+            lines.append(f"  Role-Disambiguated Residual (residual):    {app_pct:.1f}% samples improved after refinement")
             lines.append(f"  Advantage:                {'+' if adv_pct >= 0 else ''}{adv_pct:.1f}%")
             if adv_pct > 5:
                 lines.append(f"  CONCLUSION: Residual prediction significantly outperforms standard ICL")

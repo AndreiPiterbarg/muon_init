@@ -1,13 +1,13 @@
 """
-Combined Test Suite for Approaches B and C
+Combined Test Suite for Iterative Supervision and Role-Disambiguated Residual
 
 Runs both iterative supervision and residual prediction approaches,
 then compares results against a standard baseline.
 
 Expected runtime: ~2 hours
 - Baseline training: ~45 min
-- Approach B training: ~45 min
-- Approach C training: ~45 min
+- Iterative Supervision training: ~45 min
+- Role-Disambiguated Residual training: ~45 min
 - Testing: ~15 min
 
 Usage:
@@ -52,17 +52,14 @@ class Config:
     weight_decay: float = 1e-5
     max_grad_norm: float = 1.0
 
-    # Approach B config
+    # Iterative Supervision config
     b_train_iterations: int = 3
     b_iteration_weights: Tuple[float, ...] = (0.2, 0.3, 0.5)
 
-    # Approach C config
+    # Role-Disambiguated Residual config
     c_residual_weight: float = 0.5
-
-    # Fair comparison: baseline gets more steps to match compute
-    # Approach B does 3 forward passes/step, Approach C does 2
-    # Baseline multiplier compensates for this
-    baseline_step_multiplier: int = 2  # baseline trains for 2x steps
+    c_train_iterations: int = 3
+    c_unroll_warmup: int = 15000
 
     # Data
     num_context: int = 5
@@ -83,6 +80,25 @@ class Config:
         if self.kappa_ranges is None:
             self.kappa_ranges = [(1, 10), (10, 50), (50, 100), (100, 200)]
 
+    def forwards_per_step(self, approach: str) -> int:
+        """Number of forward passes per training step for each approach."""
+        if approach == "baseline":
+            return 1
+        elif approach == "iterative_supervision":
+            return self.b_train_iterations
+        elif approach == "role_disambiguated_residual":
+            return 1 + self.c_train_iterations
+        raise ValueError(f"Unknown approach: {approach}")
+
+    def steps_for(self, approach: str) -> int:
+        """Training steps for an approach, equalized by total forward passes."""
+        max_fps = max(
+            self.forwards_per_step(a)
+            for a in ["baseline", "iterative_supervision", "role_disambiguated_residual"]
+        )
+        budget = max_fps * self.training_steps
+        return budget // self.forwards_per_step(approach)
+
 
 def create_model(config: Config, device: torch.device) -> ComponentTransformerModel:
     model_config = ComponentModelConfig(
@@ -92,11 +108,11 @@ def create_model(config: Config, device: torch.device) -> ComponentTransformerMo
     return ComponentTransformerModel(model_config).to(device)
 
 
-def create_scheduler(optimizer, config: Config):
+def create_scheduler(optimizer, config: Config, total_steps: int):
     def lr_lambda(step):
         if step < config.warmup_steps:
             return step / config.warmup_steps
-        progress = (step - config.warmup_steps) / (config.training_steps - config.warmup_steps)
+        progress = (step - config.warmup_steps) / (total_steps - config.warmup_steps)
         return 0.5 * (1 + np.cos(np.pi * progress))
     return torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
 
@@ -209,12 +225,10 @@ class TokenBuilder:
 # =============================================================================
 
 def train_baseline(config: Config, device: torch.device) -> ComponentTransformerModel:
-    # Baseline gets more steps to match compute of iterative approaches
-    total_steps = config.training_steps * config.baseline_step_multiplier
+    total_steps = config.steps_for("baseline")
 
     print(f"\n{'='*60}")
-    print("TRAINING: BASELINE (Standard ICL)")
-    print(f"Steps: {total_steps} ({config.baseline_step_multiplier}x for fair compute)")
+    print(f"TRAINING: BASELINE ({total_steps} steps, {config.forwards_per_step('baseline')} fwd/step)")
     print(f"{'='*60}")
 
     model = create_model(config, device)
@@ -251,7 +265,7 @@ def train_baseline(config: Config, device: torch.device) -> ComponentTransformer
         optimizer.step()
         scheduler.step()
 
-        log_every = config.log_every * config.baseline_step_multiplier
+        log_every = config.log_every
         if step % log_every == 0:
             print(f"Step {step:5d}/{total_steps} | Loss: {loss.item():.6f} | Time: {time.time()-start:.1f}s")
 
@@ -260,17 +274,19 @@ def train_baseline(config: Config, device: torch.device) -> ComponentTransformer
 
 
 # =============================================================================
-# APPROACH B: ITERATIVE SUPERVISION
+# ITERATIVE SUPERVISION
 # =============================================================================
 
-def train_approach_b(config: Config, device: torch.device) -> ComponentTransformerModel:
+def train_iterative_supervision(config: Config, device: torch.device) -> ComponentTransformerModel:
+    total_steps = config.steps_for("iterative_supervision")
+
     print(f"\n{'='*60}")
-    print("TRAINING: APPROACH B (Iterative Supervision)")
+    print(f"TRAINING: ITERATIVE SUPERVISION ({total_steps} steps, {config.forwards_per_step('iterative_supervision')} fwd/step)")
     print(f"{'='*60}")
 
     model = create_model(config, device)
     optimizer = Adam(model.parameters(), lr=config.lr, weight_decay=config.weight_decay)
-    scheduler = create_scheduler(optimizer, config)
+    scheduler = create_scheduler(optimizer, config, total_steps)
     builder = TokenBuilder(model, config.d, device)
 
     weights = config.b_iteration_weights
@@ -279,7 +295,7 @@ def train_approach_b(config: Config, device: torch.device) -> ComponentTransform
     model.train()
     start = time.time()
 
-    for step in range(config.training_steps):
+    for step in range(total_steps):
         B, K, d = config.batch_size, config.num_context, config.d
         n_iter = config.b_train_iterations
 
@@ -309,28 +325,30 @@ def train_approach_b(config: Config, device: torch.device) -> ComponentTransform
         if step % config.log_every == 0:
             print(f"Step {step:5d} | Loss: {total_loss.item():.6f} | Time: {time.time()-start:.1f}s")
 
-    print(f"Approach B training complete in {time.time()-start:.1f}s")
+    print(f"Iterative Supervision training complete in {time.time()-start:.1f}s")
     return model
 
 
 # =============================================================================
-# APPROACH C: RESIDUAL PREDICTION
+# ROLE-DISAMBIGUATED RESIDUAL
 # =============================================================================
 
-def train_approach_c(config: Config, device: torch.device) -> ComponentTransformerModel:
+def train_role_disambiguated_residual(config: Config, device: torch.device) -> ComponentTransformerModel:
+    total_steps = config.steps_for("role_disambiguated_residual")
+
     print(f"\n{'='*60}")
-    print("TRAINING: APPROACH C (Residual Prediction)")
+    print(f"TRAINING: ROLE-DISAMBIGUATED RESIDUAL ({total_steps} steps, {config.forwards_per_step('role_disambiguated_residual')} fwd/step)")
     print(f"{'='*60}")
 
     model = create_model(config, device)
     optimizer = Adam(model.parameters(), lr=config.lr, weight_decay=config.weight_decay)
-    scheduler = create_scheduler(optimizer, config)
+    scheduler = create_scheduler(optimizer, config, total_steps)
     builder = TokenBuilder(model, config.d, device)
 
     model.train()
     start = time.time()
 
-    for step in range(config.training_steps):
+    for step in range(total_steps):
         B, K, d = config.batch_size, config.num_context, config.d
 
         A = sample_spd(B, d, device, config.kappa_min, config.kappa_max)
@@ -345,17 +363,24 @@ def train_approach_c(config: Config, device: torch.device) -> ComponentTransform
         pred_direct = model(tokens, ex_pos, mask_pos).vector_output
         loss_direct = F.mse_loss(pred_direct, x_target)
 
-        # Residual prediction loss
-        with torch.no_grad():
-            noise_scale = torch.rand(B, 1, device=device) * 0.5
-            x_estimate = pred_direct.detach() + torch.randn_like(pred_direct) * noise_scale
-            true_residual = x_target - x_estimate
+        # Unrolled multi-step residual refinement with curriculum on depth
+        if step < config.c_unroll_warmup:
+            progress = step / config.c_unroll_warmup
+            num_steps = 1 + int(progress * (config.c_train_iterations - 1))
+        else:
+            num_steps = config.c_train_iterations
 
-        tokens_r, ex_pos_r, mask_pos_r = builder.build_with_estimate(
-            A, b_ctx, x_ctx, b_query, x_estimate
-        )
-        pred_residual = model(tokens_r, ex_pos_r, mask_pos_r).vector_output
-        loss_residual = F.mse_loss(pred_residual, true_residual)
+        x_current = pred_direct.detach()
+        loss_residual = 0.0
+        for _k in range(num_steps):
+            true_residual = x_target - x_current
+            tokens_r, ex_pos_r, mask_pos_r = builder.build_with_estimate(
+                A, b_ctx, x_ctx, b_query, x_current
+            )
+            pred_residual = model(tokens_r, ex_pos_r, mask_pos_r).vector_output
+            loss_residual = loss_residual + F.mse_loss(pred_residual, true_residual)
+            x_current = (x_current + pred_residual).detach()
+        loss_residual = loss_residual / num_steps
 
         w = config.c_residual_weight
         total_loss = (1 - w) * loss_direct + w * loss_residual
@@ -371,7 +396,7 @@ def train_approach_c(config: Config, device: torch.device) -> ComponentTransform
                   f"Direct: {loss_direct.item():.6f} | Residual: {loss_residual.item():.6f} | "
                   f"Time: {time.time()-start:.1f}s")
 
-    print(f"Approach C training complete in {time.time()-start:.1f}s")
+    print(f"Role-Disambiguated Residual training complete in {time.time()-start:.1f}s")
     return model
 
 
@@ -408,7 +433,7 @@ def test_model(
 
                 mse_history = []
 
-                if approach == "baseline" or approach == "approach_b":
+                if approach == "baseline" or approach == "iterative_supervision":
                     # Test by adding predictions to context
                     for i in range(config.test_iterations):
                         tokens, ex_pos, mask_pos = builder.build_standard(A, b_ctx, x_ctx, b_query)
@@ -420,7 +445,7 @@ def test_model(
                         b_ctx = torch.cat([b_ctx, b_query.unsqueeze(1)], dim=1)
                         x_ctx = torch.cat([x_ctx, pred.unsqueeze(1)], dim=1)
 
-                elif approach == "approach_c":
+                elif approach == "role_disambiguated_residual":
                     # Test with residual refinement
                     tokens, ex_pos, mask_pos = builder.build_standard(A, b_ctx, x_ctx, b_query)
                     x_current = model(tokens, ex_pos, mask_pos).vector_output
@@ -531,25 +556,25 @@ def main():
         models["baseline"] = train_baseline(config, device)
         torch.save(models["baseline"].state_dict(), baseline_path)
 
-    # Train Approach B
-    approach_b_path = output_dir / "approach_b_model.pt"
-    if approach_b_path.exists():
-        print(f"Loading Approach B from {approach_b_path}")
-        models["approach_b"] = create_model(config, device)
-        models["approach_b"].load_state_dict(torch.load(approach_b_path, map_location=device, weights_only=True))
+    # Train Iterative Supervision
+    iterative_supervision_path = output_dir / "iterative_supervision_model.pt"
+    if iterative_supervision_path.exists():
+        print(f"Loading Iterative Supervision from {iterative_supervision_path}")
+        models["iterative_supervision"] = create_model(config, device)
+        models["iterative_supervision"].load_state_dict(torch.load(iterative_supervision_path, map_location=device, weights_only=True))
     else:
-        models["approach_b"] = train_approach_b(config, device)
-        torch.save(models["approach_b"].state_dict(), approach_b_path)
+        models["iterative_supervision"] = train_iterative_supervision(config, device)
+        torch.save(models["iterative_supervision"].state_dict(), iterative_supervision_path)
 
-    # Train Approach C
-    approach_c_path = output_dir / "approach_c_model.pt"
-    if approach_c_path.exists():
-        print(f"Loading Approach C from {approach_c_path}")
-        models["approach_c"] = create_model(config, device)
-        models["approach_c"].load_state_dict(torch.load(approach_c_path, map_location=device, weights_only=True))
+    # Train Role-Disambiguated Residual
+    rdr_path = output_dir / "role_disambiguated_residual_model.pt"
+    if rdr_path.exists():
+        print(f"Loading Role-Disambiguated Residual from {rdr_path}")
+        models["role_disambiguated_residual"] = create_model(config, device)
+        models["role_disambiguated_residual"].load_state_dict(torch.load(rdr_path, map_location=device, weights_only=True))
     else:
-        models["approach_c"] = train_approach_c(config, device)
-        torch.save(models["approach_c"].state_dict(), approach_c_path)
+        models["role_disambiguated_residual"] = train_role_disambiguated_residual(config, device)
+        torch.save(models["role_disambiguated_residual"].state_dict(), rdr_path)
 
     # Test all models
     print(f"\n{'='*60}")
