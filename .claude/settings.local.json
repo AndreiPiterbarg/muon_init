@@ -1,8 +1,0 @@
-{
-  "permissions": {
-    "allow": [
-      "Bash(python scripts/approach_c_residual_prediction.py:*)",
-      "Bash(python:*)"
-    ]
-  }
-}
