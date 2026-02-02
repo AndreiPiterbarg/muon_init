@@ -4,7 +4,9 @@ Transformers trained on in-context learning (ICL) for solving linear systems (Ax
 
 ## Key Findings
 
-**1. Naive self-refinement fails.** Feeding the model's prediction back as context causes ~2600x average MSE degradation, because the model cannot distinguish its own estimates from ground-truth context examples.
+**1. Naive self-refinement fails — Role-Disambiguated Residual fixes it.** Feeding the model's prediction back as context causes ~2600x average MSE degradation **(a)**, because the model cannot distinguish its own estimates from ground-truth context examples. By assigning distinct role embeddings to context solutions (OUTPUT) vs. current estimates (VEC_SECONDARY), and training with a dual objective (direct + residual prediction), the model achieves stable, monotonic improvement across all condition number ranges **(b)**, reducing MSE by 4–8% relative to the initial prediction.
+
+![Naive self-refinement vs. Role-Disambiguated Residual](plots/fig1_naive_vs_rdr.png)
 
 | Condition number (κ) | Standard ICL MSE | After 1 refinement | Degradation |
 |---|---|---|---|
@@ -13,9 +15,9 @@ Transformers trained on in-context learning (ICL) for solving linear systems (Ax
 | 50–100 | 1.1e-03 | 0.419 | 408x |
 | 100–200 | 2.5e-03 | 0.402 | 174x |
 
-**2. Role-Disambiguated Residual fixes it.** By assigning distinct role embeddings to context solutions (OUTPUT) vs. current estimates (VEC_SECONDARY), and training with a dual objective (direct + residual prediction), the model achieves stable iterative improvement.
+**2. The model learns Newton's method.** Hypothesis testing against classical iterative solvers (Richardson, Jacobi, steepest descent, gradient descent, Newton) shows the learned correction aligns with Newton's method (R² > 0.98 across all κ ranges).
 
-**3. The model learns Newton's method.** Hypothesis testing against classical iterative solvers (Richardson, Jacobi, steepest descent, gradient descent, Newton) shows the learned correction aligns with Newton's method (R² > 0.98 across all κ ranges).
+![Algorithm identification heatmap](plots/fig2_algorithm_heatmap.png)
 
 | κ range | Best-fit algorithm | Cosine similarity | R² |
 |---|---|---|---|
