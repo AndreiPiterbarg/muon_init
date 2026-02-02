@@ -4,16 +4,28 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Research project implementing iterative self-refinement for transformers trained on in-context learning (ICL) with linear systems. The model learns to predict residuals/corrections rather than direct solutions, enabling iterative refinement at inference.
+Research project implementing iterative self-refinement for transformers trained on in-context learning (ICL) with linear systems. The core contribution is demonstrating that naive self-refinement fails catastrophically and proposing role-based disambiguation as a solution.
+
+## Research Structure
+
+The project is organized by research contribution:
+
+1. **Section 1 - Phenomenon**: Naive ICL self-refinement fails (1600x degradation)
+2. **Section 2 - Solution**: Role-based disambiguation (Role-Disambiguated Residual)
+3. **Section 3 - Analysis**: What algorithm does the model learn?
+4. **Section 4 - Bonus**: Classical solver comparison
 
 ## Commands
 
 ```bash
-# Run main experiment (Approach C - Residual Prediction)
-python scripts/approach_c_residual_prediction.py --device cuda
+# Section 1: Demonstrate the phenomenon
+python experiments/section1_phenomenon/naive_refinement_failure.py --device cuda
 
-# Run full comparison suite (Baseline, Approach B, Approach C)
-python scripts/run_approaches_b_c.py --device cuda
+# Section 2: Train Role-Disambiguated Residual
+python experiments/section2_solution/role_disambiguated_residual.py --device cuda
+
+# Section 2: Run full comparison (Baseline, Iterative Supervision, Role-Disambiguated Residual)
+python experiments/section2_solution/run_comparison.py --device cuda
 
 # Run tests
 python -m pytest tests/ -v
@@ -40,6 +52,15 @@ pip install torch numpy scipy
 - `attention.py`: Multi-head causal attention
 - `ffn.py`: Feed-forward network
 
+**`src/data/`** - Data generation:
+- `spd_sampler.py`: SPD matrix sampling with controlled condition numbers
+
+**`experiments/`** - Organized by research section:
+- `section1_phenomenon/`: Naive refinement failure
+- `section2_solution/`: Role-Disambiguated Residual and ablations
+- `section3_analysis/`: Algorithm hypothesis testing (???)
+- `section4_bonus/`: Classical solver comparison (???)
+
 ### Token Composition
 ```
 token = embed_component(component) + embed_role(role)
@@ -59,19 +80,23 @@ x_0 = f(context, query)                 # Initial prediction
 x_{k+1} = x_k + f(context, query, x_k)  # Refinement iterations
 ```
 
-## Key Configuration (scripts/approach_c_residual_prediction.py)
+## Key Configuration
 
 ```python
+# experiments/section2_solution/role_disambiguated_residual.py
 d = 4                    # Vector/matrix dimension
 n_embd = 128            # Transformer hidden dimension
 n_layer = 6, n_head = 4 # Transformer architecture
 training_steps = 50000
 residual_weight = 0.5   # Mix of direct/residual loss
+noise_scale = 0.5       # Noise for estimate perturbation
 num_context = 5         # Context examples per sample
+kappa_min = 1.0         # Condition number range
+kappa_max = 100.0
 ```
 
 ## Data Generation
 
 SPD matrices sampled with controlled condition numbers (eigenvalues on log scale). Training uses dual loss:
 - L_direct = ||f(C, b_query) - x*||²
-- L_residual = ||f(C, b_query, x_tilde) - (x* - x_tilde)||²
+- L_residual = ||f(C, b_query, x_tilde) - (x* - x_tilde)||², where x_tilde = pred_0 + noise

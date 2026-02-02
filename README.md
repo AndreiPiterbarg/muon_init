@@ -4,7 +4,7 @@ Transformers trained on in-context learning (ICL) for solving linear systems (Ax
 
 ## Key Findings
 
-**1. Naive self-refinement fails — Role-Disambiguated Residual fixes it.** Feeding the model's prediction back as context causes ~2600x average MSE degradation **(a)**, because the model cannot distinguish its own estimates from ground-truth context examples. By assigning distinct role embeddings to context solutions (OUTPUT) vs. current estimates (VEC_SECONDARY), and training with a dual objective (direct + residual prediction), the model achieves stable, monotonic improvement across all condition number ranges **(b)**, reducing MSE by 4–8% relative to the initial prediction.
+**1. Naive self-refinement fails — Role-Disambiguated Residual fixes it.** Feeding the model's prediction back as context causes ~2600x average MSE degradation **(a)**, because the model cannot distinguish its own estimates from ground-truth context examples. By assigning distinct role embeddings to context solutions (OUTPUT) vs. current estimates (VEC_SECONDARY), and training with a dual objective (direct + residual prediction), the model achieves stable improvement across all condition number ranges **(b)**, reducing MSE by 32–55% relative to the initial prediction.
 
 ![Naive self-refinement vs. Role-Disambiguated Residual](plots/fig1_naive_vs_rdr.png)
 
@@ -15,16 +15,16 @@ Transformers trained on in-context learning (ICL) for solving linear systems (Ax
 | 50–100 | 1.1e-03 | 0.419 | 408x |
 | 100–200 | 2.5e-03 | 0.402 | 174x |
 
-**2. The model learns Newton's method.** Hypothesis testing against classical iterative solvers (Richardson, Jacobi, steepest descent, gradient descent, Newton) shows the learned correction aligns with Newton's method (R² > 0.98 across all κ ranges).
+**2. The model learns Newton's method.** Hypothesis testing against classical iterative solvers (Richardson, Jacobi, steepest descent, gradient descent, Newton) shows the learned correction aligns with Newton's method (cosine similarity > 0.98, R² > 0.94 across all κ ranges).
 
 ![Algorithm identification heatmap](plots/fig2_algorithm_heatmap.png)
 
 | κ range | Best-fit algorithm | Cosine similarity | R² |
 |---|---|---|---|
-| 1–10 | Newton | 0.9998 | 0.9994 |
-| 10–50 | Newton | 0.9991 | 0.9981 |
-| 50–100 | Newton | 0.9968 | 0.9947 |
-| 100–200 | Newton | 0.9922 | 0.9864 |
+| 1–10 | Newton | 0.9989 | 0.9929 |
+| 10–50 | Newton | 0.9942 | 0.9791 |
+| 50–100 | Newton | 0.9861 | 0.9582 |
+| 100–200 | Newton | 0.9808 | 0.9478 |
 
 ## Method
 
