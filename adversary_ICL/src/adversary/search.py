@@ -1,14 +1,110 @@
 import os
 import pickle
-import time
 
 import numpy as np
-from tqdm import tqdm
 
 from .genome import Genome
 from .evaluate import GenomeEvaluator, EvalResult
 
-cma = None
+
+class DiagonalCMAES:
+    """Minimal diagonal CMA-ES (sep-CMA-ES) for high-dimensional spaces.
+
+    Maintains only diagonal covariance (O(d) memory vs O(d^2) for full CMA-ES).
+    Good enough for d=481 and avoids external dependencies.
+    """
+
+    def __init__(self, x0: np.ndarray, sigma: float, pop_size: int, seed: int = 0):
+        self.d = len(x0)
+        self.mean = x0.copy()
+        self.sigma = sigma
+        self.pop_size = pop_size
+        self.rng = np.random.default_rng(seed)
+
+        # Diagonal covariance (variance per dimension)
+        self.C_diag = np.ones(self.d)
+
+        # Evolution paths
+        self.p_sigma = np.zeros(self.d)
+        self.p_c = np.zeros(self.d)
+
+        # Strategy parameters
+        mu = pop_size // 2
+        weights = np.log(mu + 0.5) - np.log(np.arange(1, mu + 1))
+        self.weights = weights / weights.sum()
+        self.mu_eff = 1.0 / np.sum(self.weights ** 2)
+
+        self.c_sigma = (self.mu_eff + 2) / (self.d + self.mu_eff + 5)
+        self.d_sigma = 1 + 2 * max(0, np.sqrt((self.mu_eff - 1) / (self.d + 1)) - 1) + self.c_sigma
+        self.c_c = (4 + self.mu_eff / self.d) / (self.d + 4 + 2 * self.mu_eff / self.d)
+        self.c_1 = 2 / ((self.d + 1.3) ** 2 + self.mu_eff)
+        self.c_mu = min(1 - self.c_1, 2 * (self.mu_eff - 2 + 1 / self.mu_eff) / ((self.d + 2) ** 2 + self.mu_eff))
+
+        self.chi_d = np.sqrt(self.d) * (1 - 1 / (4 * self.d) + 1 / (21 * self.d ** 2))
+
+        self.mu = mu
+        self.generation = 0
+
+    def ask(self) -> list[np.ndarray]:
+        """Sample pop_size candidates from the current distribution."""
+        std = self.sigma * np.sqrt(self.C_diag)
+        samples = []
+        for _ in range(self.pop_size):
+            z = self.rng.standard_normal(self.d)
+            x = self.mean + std * z
+            samples.append(x)
+        return samples
+
+    def tell(self, solutions: list[np.ndarray], fitnesses: list[float]):
+        """Update distribution based on evaluated fitnesses (minimization)."""
+        # Sort by fitness (ascending = better for minimization)
+        order = np.argsort(fitnesses)
+        selected = [solutions[i] for i in order[: self.mu]]
+
+        # Weighted recombination
+        old_mean = self.mean.copy()
+        self.mean = np.sum([w * x for w, x in zip(self.weights, selected)], axis=0)
+
+        std = np.sqrt(self.C_diag)
+        std_safe = np.where(std > 1e-30, std, 1e-30)
+
+        # Evolution path for sigma
+        displacement = (self.mean - old_mean) / (self.sigma * std_safe)
+        self.p_sigma = (1 - self.c_sigma) * self.p_sigma + np.sqrt(
+            self.c_sigma * (2 - self.c_sigma) * self.mu_eff
+        ) * displacement
+
+        # Evolution path for covariance
+        h_sigma = int(
+            np.linalg.norm(self.p_sigma)
+            / np.sqrt(1 - (1 - self.c_sigma) ** (2 * (self.generation + 1)))
+            < (1.4 + 2 / (self.d + 1)) * self.chi_d
+        )
+        self.p_c = (1 - self.c_c) * self.p_c + h_sigma * np.sqrt(
+            self.c_c * (2 - self.c_c) * self.mu_eff
+        ) * (self.mean - old_mean) / self.sigma
+
+        # Covariance update (diagonal only)
+        artmp = np.array([(x - old_mean) / self.sigma for x in selected])
+        C_mu_update = np.sum(
+            [w * (a / std_safe) ** 2 for w, a in zip(self.weights, artmp)], axis=0
+        )
+        self.C_diag = (
+            (1 - self.c_1 - self.c_mu) * self.C_diag
+            + self.c_1 * (self.p_c ** 2 + (1 - h_sigma) * self.c_c * (2 - self.c_c) * self.C_diag)
+            + self.c_mu * C_mu_update * self.C_diag
+        )
+
+        # Ensure positive
+        self.C_diag = np.maximum(self.C_diag, 1e-20)
+
+        # Sigma update
+        self.sigma *= np.exp(
+            (self.c_sigma / self.d_sigma) * (np.linalg.norm(self.p_sigma) / self.chi_d - 1)
+        )
+        self.sigma = np.clip(self.sigma, 1e-20, 1e10)
+
+        self.generation += 1
 
 
 def cma_search(
@@ -36,32 +132,13 @@ def cma_search(
     Returns:
         List of all EvalResults from the search.
     """
-    global cma
-    if cma is None:
-        try:
-            import cma as _cma
-            cma = _cma
-        except ImportError:
-            raise ImportError("Install pycma: pip install cma")
-
     genome_size = Genome.flat_size(n_dims)
 
     # Initialize from a structured random genome
     rng = np.random.default_rng(seed)
     x0 = Genome.random_structured(n_dims, rng).raw
 
-    # CMA-ES options
-    opts = cma.CMAOptions()
-    opts["seed"] = seed
-    opts["popsize"] = pop_size
-    opts["maxfevals"] = budget
-    opts["verb_disp"] = 0  # quiet
-    opts["verb_log"] = 0
-    # Use separable CMA-ES for high-dimensional space (faster convergence)
-    if genome_size > 200:
-        opts["CMA_diagonal"] = True
-
-    es = cma.CMAEvolutionStrategy(x0, sigma_init, opts)
+    es = DiagonalCMAES(x0, sigma_init, pop_size, seed)
 
     all_results: list[EvalResult] = []
     best_fitness = 0.0
@@ -74,7 +151,7 @@ def cma_search(
 
     print(f"Starting CMA-ES search: genome_size={genome_size}, budget={budget}, pop_size={pop_size}")
 
-    while not es.stop() and total_evals < budget:
+    while total_evals < budget:
         # Sample population
         solutions = es.ask()
         generation += 1

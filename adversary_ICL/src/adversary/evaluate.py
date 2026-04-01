@@ -6,7 +6,6 @@ from .genome import Genome
 
 from ..icl.samplers import GaussianSampler
 from ..icl.tasks import get_task_sampler
-from ..icl.eval import eval_batch
 from ..icl import models
 
 
@@ -17,15 +16,22 @@ class EvalResult:
     icl_curve: np.ndarray  # per-point ICL squared error, shape (n_points,)
     baseline_curves: dict = field(default_factory=dict)  # name -> per-point error
     covariance_spectrum: np.ndarray = field(default_factory=lambda: np.array([]))
-    descriptors: dict = field(default_factory=dict)  # named descriptor values
+    descriptors: dict = field(default_factory=dict)
     is_valid: bool = True
+
+
+def _eval_model_on_batch(model, xs, ys, device):
+    """Run model forward pass, return predictions."""
+    with torch.no_grad():
+        pred = model(xs.to(device), ys.to(device)).detach().cpu()
+    return pred
 
 
 class GenomeEvaluator:
     """Evaluates a Genome against the ICL model and baselines.
 
-    Produces fitness = how much worse ICL is than the best baseline,
-    plus per-point learning curves for analysis.
+    Uses the train distribution for in-context examples. Evaluates predictions
+    at each position using the standard forward pass (no xs_p loop, fast).
     """
 
     def __init__(
@@ -45,10 +51,15 @@ class GenomeEvaluator:
         self.batch_size = batch_size
         self.num_batches = num_batches
 
-        # Set up baselines
         if baseline_names is None:
             baseline_names = ["least_squares", "averaging"]
         self.baselines = self._build_baselines(baseline_names)
+
+        # Get device from model
+        if hasattr(icl_model, 'parameters'):
+            self.device = next(icl_model.parameters()).device
+        else:
+            self.device = "cpu"
 
     def _build_baselines(self, names: list[str]) -> list:
         name_to_cls = {
@@ -70,7 +81,7 @@ class GenomeEvaluator:
 
         try:
             return self._evaluate_inner(genome)
-        except Exception as e:
+        except Exception:
             return EvalResult(
                 genome=genome,
                 fitness=0.0,
@@ -82,83 +93,92 @@ class GenomeEvaluator:
         # Decode genome
         L_train = genome.decode_L("L_train")
         mu_train = genome.decode_mu("mu_train")
-        L_test = genome.decode_L("L_test")
-        mu_test = genome.decode_mu("mu_test")
         w = genome.decode_weights()
         noise_std = genome.decode_noise_std()
 
-        # Build samplers
-        train_sampler = GaussianSampler(self.n_dims, bias=mu_train, scale=L_train)
-        test_sampler = GaussianSampler(self.n_dims, bias=mu_test, scale=L_test)
+        # Build sampler from adversary's covariance
+        sampler = GaussianSampler(self.n_dims, bias=mu_train, scale=L_train)
 
-        # Build task sampler with adversary-controlled weights
-        pool_dict = {"w": w.unsqueeze(0).unsqueeze(-1)}  # shape (1, d, 1)
-        task_kwargs = {
-            "noise_std": noise_std,
-            "renormalize_ys": False,
-        }
-
-        def make_task_sampler():
-            return get_task_sampler(
-                "noisy_linear_regression",
-                self.n_dims,
-                self.batch_size,
-                pool_dict=pool_dict,
-                **task_kwargs,
-            )
+        # Build task with adversary-controlled weights
+        # pool_dict needs shape (num_tasks, n_dims, 1)
+        pool_dict = {"w": w.unsqueeze(0).unsqueeze(-1).expand(self.batch_size, -1, -1)}
 
         # Collect metrics across batches
-        all_icl_metrics = []
-        all_baseline_metrics = {name: [] for name, _ in self.baselines}
+        all_icl_err = []
+        all_baseline_err = {name: [] for name, _ in self.baselines}
 
         for _ in range(self.num_batches):
-            xs_train = train_sampler.sample_xs(self.n_points, self.batch_size)
-            xs_test = test_sampler.sample_xs(self.n_points, self.batch_size)
+            xs = sampler.sample_xs(self.n_points, self.batch_size)
 
-            # Check for NaN/Inf
-            if torch.isnan(xs_train).any() or torch.isnan(xs_test).any():
+            if torch.isnan(xs).any() or torch.isinf(xs).any():
                 return EvalResult(
                     genome=genome, fitness=0.0,
                     icl_curve=np.zeros(self.n_points), is_valid=False,
                 )
 
-            task_sampler = make_task_sampler()
+            # Generate ys using the adversary's task parameters
+            task = get_task_sampler(
+                "noisy_linear_regression", self.n_dims, self.batch_size,
+                pool_dict=pool_dict, noise_std=noise_std,
+            )()
+            ys = task.evaluate(xs)
 
-            # Evaluate ICL model (with separate train/test distributions)
-            icl_metrics = eval_batch(self.icl_model, task_sampler, xs_train, xs_test)
-            all_icl_metrics.append(icl_metrics)
+            if torch.isnan(ys).any() or torch.isinf(ys).any():
+                return EvalResult(
+                    genome=genome, fitness=0.0,
+                    icl_curve=np.zeros(self.n_points), is_valid=False,
+                )
 
-            # Evaluate baselines on the same data
-            # We need to replicate what eval_batch does for baselines
-            for name, baseline_model in self.baselines:
-                task_sampler_bl = make_task_sampler()
-                bl_metrics = eval_batch(baseline_model, task_sampler_bl, xs_train, xs_test)
-                all_baseline_metrics[name].append(bl_metrics)
+            # ICL model: single forward pass (fast!)
+            pred_icl = _eval_model_on_batch(self.icl_model, xs, ys, self.device)
+            icl_err = ((pred_icl - ys) ** 2).mean(dim=0)  # (n_points,)
+            all_icl_err.append(icl_err)
 
-        # Aggregate: mean over batches and batch items -> per-point curve
-        icl_curve = torch.cat(all_icl_metrics, dim=0).mean(dim=0).numpy()
+            # Baselines
+            for name, baseline in self.baselines:
+                pred_bl = baseline(xs, ys)
+                bl_err = ((pred_bl - ys) ** 2).mean(dim=0)
+                all_baseline_err[name].append(bl_err)
+
+        # Aggregate: mean over batches
+        icl_curve = torch.stack(all_icl_err).mean(dim=0).numpy()
         baseline_curves = {}
-        for name, metrics_list in all_baseline_metrics.items():
-            baseline_curves[name] = torch.cat(metrics_list, dim=0).mean(dim=0).numpy()
+        for name, err_list in all_baseline_err.items():
+            baseline_curves[name] = torch.stack(err_list).mean(dim=0).numpy()
 
-        # Compute fitness: max ratio of ICL error to best baseline error
+        # Compute fitness: additive gap between ICL and best baseline
+        # Use the gap at points where baseline has meaningful error (k < n_dims)
+        # to avoid dividing by near-zero OLS error when the system is determined
         best_baseline = np.minimum.reduce(list(baseline_curves.values()))
-        eps = 1e-6
-        ratio_curve = icl_curve / (best_baseline + eps)
 
-        # Degeneracy penalty: penalize if baseline also fails badly
-        # (meaning the task itself is too hard/trivial, not an ICL-specific failure)
-        baseline_mean_err = best_baseline.mean()
-        trivial_err = 1.0  # rough scale for "trivial" error
-        # Penalty is low when baseline error is huge (task impossible) or tiny (task trivial)
-        degeneracy_penalty = float(np.clip(
-            np.minimum(baseline_mean_err / trivial_err, trivial_err / (baseline_mean_err + eps)),
-            0.0, 1.0,
-        ))
+        # Additive gap: how much worse ICL is in absolute terms
+        gap_curve = icl_curve - best_baseline
 
-        fitness = float(ratio_curve.max()) * degeneracy_penalty
+        # Normalize by the scale of the problem (baseline error at k=1)
+        scale = max(best_baseline[1] if len(best_baseline) > 1 else 1.0, 1e-6)
+        normalized_gap = gap_curve / scale
 
-        # Compute descriptors for post-hoc analysis
+        # Take mean gap over all points (captures sustained failure, not just spikes)
+        mean_gap = float(normalized_gap.mean())
+
+        # Also compute ratio but only where baseline has meaningful error
+        meaningful_mask = best_baseline > 0.01 * scale
+        if meaningful_mask.any():
+            ratio_where_meaningful = (icl_curve[meaningful_mask] / best_baseline[meaningful_mask]).mean()
+        else:
+            ratio_where_meaningful = 1.0
+
+        # Fitness = combination of normalized gap and ratio
+        fitness = max(mean_gap, 0.0) + max(float(ratio_where_meaningful) - 1.0, 0.0)
+
+        # Degeneracy penalty: penalize when the task is trivial or impossible
+        baseline_at_1 = best_baseline[1] if len(best_baseline) > 1 else 1.0
+        if baseline_at_1 < 1e-6:
+            fitness *= 0.01  # trivial task
+        elif baseline_at_1 > 1e4:
+            fitness *= 1e4 / baseline_at_1  # impossible task
+
+        # Descriptors
         spectrum = genome.eigenvalues("L_train")
         descriptors = self._compute_descriptors(genome, icl_curve, best_baseline, spectrum)
 
@@ -176,37 +196,28 @@ class GenomeEvaluator:
         self, genome: Genome, icl_curve: np.ndarray,
         baseline_curve: np.ndarray, spectrum: np.ndarray,
     ) -> dict:
-        """Compute behavioral descriptors for post-hoc analysis."""
         eps = 1e-8
 
-        # Effective rank
         eff_rank = float(np.sum(spectrum) ** 2 / (np.sum(spectrum ** 2) + eps))
-
-        # Condition number
         cond = float(spectrum[0] / (spectrum[-1] + eps))
         cond_log = float(np.log10(cond + 1))
 
-        # Train-test divergence (Frobenius distance between covariances)
         Sigma_train = genome.decode_covariance("L_train").numpy()
         Sigma_test = genome.decode_covariance("L_test").numpy()
         train_test_div = float(np.linalg.norm(Sigma_train - Sigma_test, "fro") / self.n_dims)
 
-        # Peak failure position (where in the learning curve is the gap largest)
         gap = icl_curve / (baseline_curve + eps)
         peak_pos = float(np.argmax(gap) / max(len(gap) - 1, 1))
 
-        # Weight-covariance alignment
         w = genome.decode_weights().numpy()
         w_norm = w / (np.linalg.norm(w) + eps)
         eigvecs = np.linalg.eigh(Sigma_train)[1]
-        top_eigvec = eigvecs[:, -1]  # largest eigenvalue's eigenvector
+        top_eigvec = eigvecs[:, -1]
         alignment = float(np.abs(np.dot(w_norm, top_eigvec)))
 
-        # Spectral entropy
         p = spectrum / (spectrum.sum() + eps)
         spectral_entropy = float(-np.sum(p * np.log(p + eps)))
 
-        # Noise-to-signal
         noise_std = genome.decode_noise_std()
         w_norm_val = float(np.linalg.norm(w))
         nsr = noise_std / (w_norm_val + eps)
