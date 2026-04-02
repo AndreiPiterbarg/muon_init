@@ -206,6 +206,48 @@ class LeastSquaresModel:
         return torch.stack(preds, dim=1)
 
 
+class RidgeRegressionModel:
+    """Ridge regression baseline: w = (X^T X + alpha * I)^{-1} X^T y.
+
+    This is the Bayes-optimal estimator for linear regression with Gaussian
+    prior on weights. More numerically stable than OLS on ill-conditioned
+    problems, making it the proper comparison for ICL on adversarial inputs.
+    """
+
+    def __init__(self, alpha=1.0):
+        self.alpha = alpha
+        self.name = f"ridge_alpha={alpha}"
+
+    def __call__(self, xs, ys, inds=None):
+        xs, ys = xs.cpu(), ys.cpu()
+        if inds is None:
+            inds = range(ys.shape[1])
+        else:
+            if max(inds) >= ys.shape[1] or min(inds) < 0:
+                raise ValueError("inds contain indices where xs and ys are not defined")
+
+        preds = []
+        n_dims = xs.shape[2]
+
+        for i in inds:
+            if i == 0:
+                preds.append(torch.zeros_like(ys[:, 0]))
+                continue
+            train_xs, train_ys = xs[:, :i], ys[:, :i]
+            test_x = xs[:, i : i + 1]
+
+            # w = (X^T X + alpha * I)^{-1} X^T y
+            XtX = torch.bmm(train_xs.transpose(1, 2), train_xs)
+            reg = self.alpha * torch.eye(n_dims).unsqueeze(0).expand(XtX.shape[0], -1, -1)
+            Xty = torch.bmm(train_xs.transpose(1, 2), train_ys.unsqueeze(2))
+            ws = torch.linalg.solve(XtX + reg, Xty)
+
+            pred = torch.bmm(test_x, ws)
+            preds.append(pred[:, 0, 0])
+
+        return torch.stack(preds, dim=1)
+
+
 class AveragingModel:
     def __init__(self):
         self.name = "averaging"
