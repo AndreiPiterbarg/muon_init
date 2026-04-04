@@ -1,0 +1,29 @@
+# Deep MLP on CIFAR-10 (flattened)
+# ~600K params, ~2 min/run, HIGH init sensitivity
+# No BatchNorm, no skip connections — pure signal propagation test.
+
+model:
+  name: deep_mlp
+  input_dim: 3072
+  hidden_dim: 256
+  num_classes: 10
+  num_layers: 8
+
+data:
+  name: cifar10
+  batch_size: 128
+
+training:
+  total_steps: 5000
+  warmup_steps: 200
+  lr_muon: 0.02
+  lr_adam: 0.0003
+  momentum: 0.95
+  weight_decay_muon: 0.0
+  weight_decay_adam: 0.01
+  eval_every: 500
+  log_every: 100
+
+init: kaiming_normal
+use_muon: true
+seed: 42

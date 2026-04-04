@@ -1,0 +1,32 @@
+# Deep Narrow Transformer on WikiText-103
+# ~2.5M params, ~15 min/run, HIGH init sensitivity
+# 12 layers, post-norm — maximally stresses signal propagation.
+
+model:
+  name: deep_narrow_gpt
+  vocab_size: 50257  # GPT-2 BPE
+  block_size: 256
+  n_layer: 12
+  n_head: 4
+  n_embd: 128
+  dropout: 0.1
+
+data:
+  name: wikitext103
+  batch_size: 32
+  block_size: 256
+
+training:
+  total_steps: 10000
+  warmup_steps: 1000
+  lr_muon: 0.02
+  lr_adam: 0.0003
+  momentum: 0.95
+  weight_decay_muon: 0.0
+  weight_decay_adam: 0.1
+  eval_every: 1000
+  log_every: 100
+
+init: kaiming_normal
+use_muon: true
+seed: 42
