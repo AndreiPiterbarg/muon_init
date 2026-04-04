@@ -3,6 +3,7 @@ import torch
 from dataclasses import dataclass, field
 
 from .genome import Genome
+from .pipeline_genome import PipelineGenome
 
 from ..icl.samplers import GaussianSampler
 from ..icl.tasks import get_task_sampler
@@ -11,9 +12,11 @@ from ..icl import models
 
 @dataclass
 class EvalResult:
-    genome: Genome
+    genome: object  # Genome or PipelineGenome
     fitness: float
-    icl_curve: np.ndarray  # per-point ICL squared error, shape (n_points,)
+    raw_fitness: float = 0.0
+    complexity: float = 0.0
+    icl_curve: np.ndarray = field(default_factory=lambda: np.zeros(0))
     baseline_curves: dict = field(default_factory=dict)  # name -> per-point error
     covariance_spectrum: np.ndarray = field(default_factory=lambda: np.array([]))
     descriptors: dict = field(default_factory=dict)
@@ -45,6 +48,10 @@ class GenomeEvaluator:
         batch_size: int = 64,
         num_batches: int = 10,
         baseline_names: list[str] | None = None,
+        parsimony_lambda: float = 0.0,
+        c_base: float = 1.0,
+        c_stage: float = 1.0,
+        c_affine: float = 1.0,
     ):
         self.icl_model = icl_model
         self.task_name = task_name
@@ -52,6 +59,12 @@ class GenomeEvaluator:
         self.n_points = n_points
         self.batch_size = batch_size
         self.num_batches = num_batches
+
+        # Parsimony pressure
+        self.parsimony_lambda = parsimony_lambda
+        self.c_base = c_base
+        self.c_stage = c_stage
+        self.c_affine = c_affine
 
         if baseline_names is None:
             baseline_names = ["ridge", "least_squares", "averaging"]
@@ -77,8 +90,11 @@ class GenomeEvaluator:
                 result.append((name, cls(**kwargs)))
         return result
 
-    def evaluate(self, genome: Genome) -> EvalResult:
-        """Full evaluation: run ICL model + baselines on genome's distribution."""
+    def evaluate(self, genome) -> EvalResult:
+        """Full evaluation: run ICL model + baselines on genome's distribution.
+
+        Accepts both Genome (legacy) and PipelineGenome.
+        """
         genome = genome.copy()
         genome.clamp_()
 
@@ -92,15 +108,18 @@ class GenomeEvaluator:
                 is_valid=False,
             )
 
-    def _evaluate_inner(self, genome: Genome) -> EvalResult:
-        # Decode genome (train = test, tied distributions)
-        L = genome.decode_L_normalized()
-        mu = genome.decode_mu()
+    def _evaluate_inner(self, genome) -> EvalResult:
+        # Decode common genome fields
         w = genome.decode_weights()  # unit-normalized
         noise_std = genome.decode_noise_std()
 
-        # Build sampler from adversary's covariance (same for train and test)
-        sampler = GaussianSampler(self.n_dims, bias=mu, scale=L)
+        is_pipeline = isinstance(genome, PipelineGenome)
+
+        # Build sampler (legacy path uses GaussianSampler)
+        if not is_pipeline:
+            L = genome.decode_L_normalized()
+            mu = genome.decode_mu()
+            sampler = GaussianSampler(self.n_dims, bias=mu, scale=L)
 
         # Build task with adversary-controlled weight direction
         # pool_dict needs shape (num_tasks, n_dims, 1)
@@ -111,7 +130,10 @@ class GenomeEvaluator:
         all_baseline_err = {name: [] for name, _ in self.baselines}
 
         for _ in range(self.num_batches):
-            xs = sampler.sample_xs(self.n_points, self.batch_size)
+            if is_pipeline:
+                xs = genome.sample_xs(self.n_points, self.batch_size)
+            else:
+                xs = sampler.sample_xs(self.n_points, self.batch_size)
 
             if torch.isnan(xs).any() or torch.isinf(xs).any():
                 return EvalResult(
@@ -169,17 +191,36 @@ class GenomeEvaluator:
 
         if log_ratios:
             # Fitness = mean log-ratio (0 = ICL matches baseline, >0 = ICL worse)
-            fitness = max(float(np.mean(log_ratios)), 0.0)
+            raw_fitness = max(float(np.mean(log_ratios)), 0.0)
         else:
-            fitness = 0.0
+            raw_fitness = 0.0
+
+        # Parsimony pressure (pipeline genomes only)
+        if is_pipeline and self.parsimony_lambda > 0:
+            complexity = genome.complexity(self.c_base, self.c_stage, self.c_affine)
+            fitness = raw_fitness - self.parsimony_lambda * complexity
+            fitness = max(fitness, 0.0)
+        else:
+            complexity = 0.0
+            fitness = raw_fitness
 
         # Descriptors for post-hoc analysis
         spectrum = genome.eigenvalues()
         descriptors = self._compute_descriptors(genome, icl_curve, best_baseline, spectrum)
 
+        # Add pipeline-specific descriptors
+        if is_pipeline:
+            descriptors["base_distribution"] = genome.base_distribution_name()
+            descriptors["num_active_stages"] = genome.num_active_stages()
+            descriptors["active_transforms"] = [
+                name for _, name in genome.active_stages()
+            ]
+
         return EvalResult(
             genome=genome,
             fitness=fitness,
+            raw_fitness=raw_fitness,
+            complexity=complexity,
             icl_curve=icl_curve,
             baseline_curves=baseline_curves,
             covariance_spectrum=spectrum,
@@ -188,7 +229,7 @@ class GenomeEvaluator:
         )
 
     def _compute_descriptors(
-        self, genome: Genome, icl_curve: np.ndarray,
+        self, genome, icl_curve: np.ndarray,
         baseline_curve: np.ndarray, spectrum: np.ndarray,
     ) -> dict:
         eps = 1e-8
@@ -204,11 +245,22 @@ class GenomeEvaluator:
         ratio_curve = icl_curve / (baseline_curve + eps)
         peak_pos = float(np.argmax(ratio_curve) / max(len(ratio_curve) - 1, 1))
 
-        # Weight-covariance alignment (using CORRECT covariance L^T @ L)
-        Sigma = genome.decode_covariance().numpy()
+        # Weight-covariance alignment
         w = genome.decode_weights().numpy()
-        eigvals, eigvecs = np.linalg.eigh(Sigma)
-        top_eigvec = eigvecs[:, -1]  # eigenvector of largest eigenvalue
+        if isinstance(genome, PipelineGenome):
+            # Compute empirical covariance from eigenvalues (already computed)
+            # Use spectrum directly; eigvec alignment requires full covariance
+            # Estimate from a sample batch
+            with torch.no_grad():
+                xs_sample = genome.sample_xs(200, 1)
+            if not torch.isnan(xs_sample).any():
+                Sigma = np.cov(xs_sample[0].numpy(), rowvar=False)
+            else:
+                Sigma = np.eye(len(w))
+        else:
+            Sigma = genome.decode_covariance().numpy()
+        eigvals_s, eigvecs = np.linalg.eigh(Sigma)
+        top_eigvec = eigvecs[:, -1]
         alignment = float(np.abs(np.dot(w, top_eigvec)))
 
         # Spectral entropy

@@ -4,6 +4,7 @@ import pickle
 import numpy as np
 
 from .genome import Genome
+from .pipeline_genome import PipelineGenome
 from .evaluate import GenomeEvaluator, EvalResult
 
 
@@ -115,10 +116,13 @@ def _run_single_cma(
     sigma_init: float,
     seed: int,
     restart_id: int,
+    genome_cls=None,
 ) -> list[EvalResult]:
     """Run a single CMA-ES restart. Returns list of EvalResults."""
+    if genome_cls is None:
+        genome_cls = PipelineGenome
     rng = np.random.default_rng(seed)
-    x0 = Genome.random_structured(n_dims, rng).raw
+    x0 = genome_cls.random_structured(n_dims, rng).raw
 
     es = DiagonalCMAES(x0, sigma_init, pop_size, seed)
 
@@ -135,7 +139,7 @@ def _run_single_cma(
         gen_results = []
 
         for sol in solutions:
-            genome = Genome(n_dims, np.array(sol))
+            genome = genome_cls(n_dims, np.array(sol))
             result = evaluator.evaluate(genome)
             gen_results.append(result)
             # CMA-ES minimizes, so negate fitness (we want to maximize gap)
@@ -174,6 +178,7 @@ def cma_search(
     save_dir: str | None = None,
     save_interval: int = 50,
     seed: int = 0,
+    genome_cls=None,
 ) -> list[EvalResult]:
     """Run multi-restart CMA-ES adversarial search over the genome space.
 
@@ -191,11 +196,14 @@ def cma_search(
         save_dir: Directory to save checkpoints. None = no saving.
         save_interval: Save checkpoint every N generations.
         seed: Base random seed (each restart uses seed + restart_id).
+        genome_cls: Genome class to use (PipelineGenome or Genome).
 
     Returns:
         List of all EvalResults from all restarts.
     """
-    genome_size = Genome.flat_size(n_dims)
+    if genome_cls is None:
+        genome_cls = PipelineGenome
+    genome_size = genome_cls.flat_size(n_dims)
     budget_per_restart = budget // num_restarts
 
     if save_dir:
@@ -223,6 +231,7 @@ def cma_search(
             sigma_init=sigma_init,
             seed=restart_seed,
             restart_id=restart_id,
+            genome_cls=genome_cls,
         )
 
         all_results.extend(restart_results)
