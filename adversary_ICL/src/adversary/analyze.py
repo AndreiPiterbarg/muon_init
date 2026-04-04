@@ -207,8 +207,26 @@ def plot_descriptor_scatter(df: pd.DataFrame, output_dir: str,
     plt.close()
 
 
-def run_analysis(save_dir: str, output_dir: str | None = None):
-    """Full post-hoc analysis pipeline."""
+def run_analysis(
+    save_dir: str,
+    output_dir: str | None = None,
+    icl_model=None,
+    evaluator=None,
+    run_diagnostics: bool = False,
+    diagnostics_top_k: int = 5,
+    diagnostics_list: list[str] | None = None,
+):
+    """Full post-hoc analysis pipeline.
+
+    Args:
+        save_dir: Directory containing checkpoint.pkl.
+        output_dir: Where to save analysis output.
+        icl_model: Required if run_diagnostics=True.
+        evaluator: Required if run_diagnostics=True.
+        run_diagnostics: Whether to run the diagnostic suite on top failures.
+        diagnostics_top_k: Number of top failures to diagnose.
+        diagnostics_list: Which diagnostics to run (None = defaults).
+    """
     if output_dir is None:
         output_dir = os.path.join(save_dir, "analysis")
     os.makedirs(output_dir, exist_ok=True)
@@ -250,6 +268,22 @@ def run_analysis(save_dir: str, output_dir: str | None = None):
     plot_descriptor_scatter(df, output_dir, "condition_number_log", "effective_rank")
     plot_descriptor_scatter(df, output_dir, "noise_std", "weight_alignment")
     plot_descriptor_scatter(df, output_dir, "spectral_entropy", "peak_failure_position")
+
+    # Diagnostics (optional)
+    if run_diagnostics and icl_model is not None and evaluator is not None:
+        from ..eval.run_diagnostics import run_all_diagnostics
+
+        diag_top = top_failures(results, diagnostics_top_k)
+        for i, r in enumerate(diag_top):
+            print(f"\n--- Diagnostics for failure #{i+1} (fitness={r.fitness:.4f}) ---")
+            diag_dir = os.path.join(output_dir, f"diagnostics_failure_{i+1}")
+            run_all_diagnostics(
+                model=icl_model,
+                genome=r.genome,
+                evaluator=evaluator,
+                output_dir=diag_dir,
+                diagnostics=diagnostics_list,
+            )
 
     print("Analysis complete.")
     return df, top
