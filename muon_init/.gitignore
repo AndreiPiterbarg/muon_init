@@ -1,0 +1,38 @@
+# Data cache
+data_cache/
+
+# Large experiment results
+experiments/results/*
+!experiments/results/.gitkeep
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Environments
+.venv/
+venv/
+env/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Data files (add exceptions as needed)
+*.pt
+*.pth
+*.ckpt
+*.h5
+*.bin
+
+# Logs
+*.log
+wandb/
+runs/
