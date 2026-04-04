@@ -14,6 +14,7 @@ class DataSampler:
 def get_data_sampler(data_name, n_dims, **kwargs):
     names_to_classes = {
         "gaussian": GaussianSampler,
+        "pipeline": PipelineSampler,
     }
     if data_name in names_to_classes:
         sampler_cls = names_to_classes[data_name]
@@ -53,6 +54,26 @@ class GaussianSampler(DataSampler):
             xs_b = xs_b @ self.scale
         if self.bias is not None:
             xs_b += self.bias
+        if n_dims_truncated is not None:
+            xs_b[:, :, n_dims_truncated:] = 0
+        return xs_b
+
+
+class PipelineSampler(DataSampler):
+    """Wraps a PipelineGenome to act as a DataSampler for retraining.
+
+    This allows the ICL training loop to use adversarial distributions
+    for data augmentation or adversarial retraining.
+    """
+
+    def __init__(self, n_dims, genome=None, **kwargs):
+        super().__init__(n_dims)
+        self.genome = genome
+
+    def sample_xs(self, n_points, b_size, n_dims_truncated=None, seeds=None):
+        if self.genome is None:
+            raise ValueError("PipelineSampler requires a genome to sample from")
+        xs_b = self.genome.sample_xs(n_points, b_size)
         if n_dims_truncated is not None:
             xs_b[:, :, n_dims_truncated:] = 0
         return xs_b
