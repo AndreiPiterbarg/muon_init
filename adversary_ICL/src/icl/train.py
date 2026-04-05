@@ -39,26 +39,31 @@ def sample_seeds(total_seeds, count):
     return seeds
 
 
-def train(model, args):
+def train(model, args, data_sampler=None, override_lr=None):
     optimizer = torch.optim.Adam(model.parameters(), lr=args.training.learning_rate)
     curriculum = Curriculum(args.training.curriculum)
 
     starting_step = 0
     state_path = os.path.join(args.out_dir, "state.pt")
     if os.path.exists(state_path):
-        state = torch.load(state_path)
+        state = torch.load(state_path, map_location="cpu")
         model.load_state_dict(state["model_state_dict"])
         optimizer.load_state_dict(state["optimizer_state_dict"])
         starting_step = state["train_step"]
         for i in range(state["train_step"] + 1):
             curriculum.update()
 
+    if override_lr is not None:
+        for param_group in optimizer.param_groups:
+            param_group['lr'] = override_lr
+
     n_dims = model.n_dims
     bsize = args.training.batch_size
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
-    data_sampler = get_data_sampler(args.training.data, n_dims=n_dims)
+    if data_sampler is None:
+        data_sampler = get_data_sampler(args.training.data, n_dims=n_dims)
     task_sampler = get_task_sampler(
         args.training.task,
         n_dims,
