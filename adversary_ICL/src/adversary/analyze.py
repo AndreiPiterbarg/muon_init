@@ -43,15 +43,21 @@ def top_failures(results: list[EvalResult], k: int = 10) -> list[EvalResult]:
 
 
 def correlate_with_fitness(df: pd.DataFrame) -> pd.DataFrame:
-    """Spearman correlation of each feature with fitness."""
+    """Spearman correlation of each numeric feature with fitness."""
     cols = [c for c in df.columns if c != "fitness"]
     rows = []
     for col in cols:
+        # Skip non-numeric columns (e.g., active_transforms list, base_distribution str)
+        if not pd.api.types.is_numeric_dtype(df[col]):
+            continue
         mask = df[col].notna()
         if mask.sum() < 10:
             continue
-        rho, pval = spearmanr(df.loc[mask, col], df.loc[mask, "fitness"])
-        rows.append({"feature": col, "spearman_rho": rho, "p_value": pval})
+        try:
+            rho, pval = spearmanr(df.loc[mask, col], df.loc[mask, "fitness"])
+            rows.append({"feature": col, "spearman_rho": rho, "p_value": pval})
+        except (ValueError, TypeError):
+            continue
     return pd.DataFrame(rows).sort_values("spearman_rho", ascending=False, key=abs)
 
 
