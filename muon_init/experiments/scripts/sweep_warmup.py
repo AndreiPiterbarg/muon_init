@@ -10,11 +10,15 @@ Usage:
 
 import argparse
 import itertools
+import os
 import subprocess
 import sys
 
-INITS = ["kaiming_normal", "kaiming_uniform", "xavier_normal", "xavier_uniform", "orthogonal"]
-WARMUP_STEPS = [0, 100, 500, 1000, 2000]
+INITS = [
+    "kaiming_normal", "kaiming_uniform", "xavier_normal", "xavier_uniform",
+    "orthogonal", "scaled_orthogonal",
+]
+WARMUP_STEPS = [0, 100, 200, 500, 1000, 2000]
 
 
 def main():
@@ -31,7 +35,15 @@ def main():
     print(f"Sweep: {len(runs)} runs ({len(args.inits)} inits x "
           f"{len(args.warmups)} warmups x {args.seeds} seeds)")
 
+    save_dir = "experiments/results"
+    skipped = 0
     for init, warmup, seed in runs:
+        # Skip runs that already have results.
+        result_name = f"deep_mlp_{init}_warmup{warmup}_seed{seed}.json"
+        if os.path.exists(os.path.join(save_dir, result_name)):
+            skipped += 1
+            continue
+
         cmd = [
             sys.executable, "-m", "experiments.train",
             "--config", args.config,
@@ -50,6 +62,9 @@ def main():
         result = subprocess.run(cmd)
         if result.returncode != 0:
             print(f"  WARNING: run failed with code {result.returncode}")
+
+    if skipped:
+        print(f"\nSkipped {skipped} already-completed runs.")
 
 
 if __name__ == "__main__":

@@ -24,6 +24,7 @@ from optimizers.muon import MuonAdamW
 from initializations.baselines.baselines import (
     kaiming_normal, kaiming_uniform, xavier_normal, xavier_uniform, orthogonal,
 )
+from initializations.implementations.scaled_orthogonal import scaled_orthogonal
 
 
 INIT_REGISTRY = {
@@ -32,8 +33,22 @@ INIT_REGISTRY = {
     "xavier_normal": xavier_normal,
     "xavier_uniform": xavier_uniform,
     "orthogonal": orthogonal,
+    "scaled_orthogonal": lambda model: scaled_orthogonal(model),  # auto alpha from ReLU
     "default": lambda model: None,  # PyTorch defaults
 }
+
+# Register scaled_orthogonal variants for the alpha sweep.
+_ALPHA_VALUES = {
+    "scaled_orth_0.5": 0.5,
+    "scaled_orth_0.75": 0.75,
+    "scaled_orth_1.0": 1.0,
+    "scaled_orth_sqrt2": math.sqrt(2),
+    "scaled_orth_1.5": 1.5,
+    "scaled_orth_2.0": 2.0,
+    "scaled_orth_2.5": 2.5,
+}
+for _name, _alpha in _ALPHA_VALUES.items():
+    INIT_REGISTRY[_name] = (lambda a: lambda model: scaled_orthogonal(model, alpha=a))(_alpha)
 
 
 def get_lr(step, warmup_steps, max_lr, total_steps, min_lr=0.0):
