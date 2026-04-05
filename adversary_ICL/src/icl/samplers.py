@@ -77,3 +77,58 @@ class PipelineSampler(DataSampler):
         if n_dims_truncated is not None:
             xs_b[:, :, n_dims_truncated:] = 0
         return xs_b
+
+
+class MixedSampler(DataSampler):
+    """Mix standard Gaussian with adversarial distributions for retraining.
+
+    Each batch element is independently drawn from either the standard
+    Gaussian (with probability 1-p_adv) or an adversarial genome's
+    distribution (with probability p_adv), selected by fitness-weighted
+    sampling so harder failures get more training exposure.
+
+    Supports both legacy Genome (Cholesky-only) and PipelineGenome.
+
+    NOTE: p_adv=0.3 is a starting point from RESEARCH_PLAN.md. This value
+    must be tuned empirically — too high risks catastrophic forgetting on
+    standard data, too low won't teach robustness. The retrain loop uses
+    dynamic p_adv that scales with curriculum size.
+    """
+
+    def __init__(self, n_dims, genomes=None, weights=None, p_adv=0.3, **kwargs):
+        super().__init__(n_dims)
+        self.base = GaussianSampler(n_dims)
+        self.genomes = genomes if genomes is not None else []
+        self.p_adv = p_adv
+
+        # Fitness-weighted sampling: higher fitness → more training exposure
+        if weights is not None and len(weights) > 0:
+            w = torch.tensor(weights, dtype=torch.float32)
+            self.weights = w / w.sum()
+        else:
+            self.weights = None
+
+    def sample_xs(self, n_points, b_size, n_dims_truncated=None, seeds=None):
+        xs_list = []
+        for i in range(b_size):
+            if torch.rand(1).item() < self.p_adv and self.genomes:
+                if self.weights is not None:
+                    idx = torch.multinomial(self.weights, 1).item()
+                else:
+                    idx = torch.randint(len(self.genomes), (1,)).item()
+                g = self.genomes[idx]
+                # PipelineGenome has sample_xs; legacy Genome uses GaussianSampler
+                if hasattr(g, "sample_xs"):
+                    xs_i = g.sample_xs(n_points, 1)
+                else:
+                    L = g.decode_L_normalized()
+                    mu = g.decode_mu()
+                    s = GaussianSampler(self.n_dims, bias=mu, scale=L)
+                    xs_i = s.sample_xs(n_points, 1)
+            else:
+                xs_i = self.base.sample_xs(n_points, 1)
+            xs_list.append(xs_i)
+        xs = torch.cat(xs_list, dim=0)
+        if n_dims_truncated is not None:
+            xs[:, :, n_dims_truncated:] = 0
+        return xs
