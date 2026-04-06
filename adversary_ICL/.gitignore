@@ -10,6 +10,7 @@ results/logs/
 *.pt
 *.pth
 *.ckpt
+*.pkl
 
 .env
 *.swp

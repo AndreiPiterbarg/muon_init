@@ -1,0 +1,74 @@
+{
+  "0.0": {
+    "lambda": 0.0,
+    "effective_fitness": 0.9359729886054993,
+    "raw_fitness": 0.9359729886054993,
+    "num_active_stages": 2,
+    "base_distribution": "gaussian",
+    "active_transforms": [
+      "sorting_rank",
+      "elementwise_power"
+    ],
+    "complexity": 0.0
+  },
+  "0.01": {
+    "lambda": 0.01,
+    "effective_fitness": 0.9318168568611145,
+    "raw_fitness": 0.9518168568611145,
+    "num_active_stages": 2,
+    "base_distribution": "gaussian",
+    "active_transforms": [
+      "sorting_rank",
+      "elementwise_power"
+    ],
+    "complexity": 2.0
+  },
+  "0.03": {
+    "lambda": 0.03,
+    "effective_fitness": 0.865609290599823,
+    "raw_fitness": 0.925609290599823,
+    "num_active_stages": 2,
+    "base_distribution": "gaussian",
+    "active_transforms": [
+      "sorting_rank",
+      "elementwise_power"
+    ],
+    "complexity": 2.0
+  },
+  "0.1": {
+    "lambda": 0.1,
+    "effective_fitness": 0.7417374730110169,
+    "raw_fitness": 0.9417374730110168,
+    "num_active_stages": 2,
+    "base_distribution": "gaussian",
+    "active_transforms": [
+      "sorting_rank",
+      "elementwise_power"
+    ],
+    "complexity": 2.0
+  },
+  "0.3": {
+    "lambda": 0.3,
+    "effective_fitness": 0.32346179485321047,
+    "raw_fitness": 0.9234617948532104,
+    "num_active_stages": 2,
+    "base_distribution": "gaussian",
+    "active_transforms": [
+      "sorting_rank",
+      "elementwise_power"
+    ],
+    "complexity": 2.0
+  },
+  "1.0": {
+    "lambda": 1.0,
+    "effective_fitness": 0.0,
+    "raw_fitness": 0.7828224897384644,
+    "num_active_stages": 2,
+    "base_distribution": "gaussian",
+    "active_transforms": [
+      "sorting_rank",
+      "elementwise_power"
+    ],
+    "complexity": 2.0
+  }
+}

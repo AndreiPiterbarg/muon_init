@@ -47,6 +47,9 @@ def main():
     model, conf = get_model_from_run(run_path, step)
     device = "cuda" if torch.cuda.is_available() else "cpu"
     model = model.to(device).eval()
+    if device == "cuda" and hasattr(torch, "compile"):
+        print("Compiling model with torch.compile...")
+        model = torch.compile(model)
 
     # Task config
     task_config = config.get("task", {})

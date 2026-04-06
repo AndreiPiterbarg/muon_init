@@ -1,0 +1,20 @@
+{
+  "1": {
+    "best_fitness": 20.866573333740234,
+    "curriculum_size": 50,
+    "effective_p_adv": 0.3,
+    "effective_ft_p_adv": 0.5,
+    "scratch_benchmark_mean": 130.71620733087713,
+    "cumulative_benchmark_mean": 83.01778507232666,
+    "stopped": null
+  },
+  "2": {
+    "best_fitness": 18.196855545043945,
+    "curriculum_size": 75,
+    "effective_p_adv": 0.44999999999999996,
+    "effective_ft_p_adv": 0.65,
+    "scratch_benchmark_mean": 583.5037071921608,
+    "cumulative_benchmark_mean": 126.25019186193293,
+    "stopped": null
+  }
+}

@@ -1,0 +1,7 @@
+lambda,effective_fitness,raw_fitness,num_active_stages,base_distribution,complexity
+0.0,0.935973,0.935973,2,gaussian,0.000000
+0.01,0.931817,0.951817,2,gaussian,2.000000
+0.03,0.865609,0.925609,2,gaussian,2.000000
+0.1,0.741737,0.941737,2,gaussian,2.000000
+0.3,0.323462,0.923462,2,gaussian,2.000000
+1.0,0.000000,0.782822,2,gaussian,2.000000

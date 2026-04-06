@@ -1,0 +1,87 @@
+{
+  "total_evals": 10080,
+  "valid_evals": 10080,
+  "best_fitness": 253732383.0,
+  "mean_fitness": 2684743.374854243,
+  "top_5": [
+    {
+      "fitness": 253732383.0,
+      "condition_number": 48088031232.0,
+      "effective_rank": 1.0795807838439941,
+      "noise_std": 0.006737946999085467,
+      "descriptors": {
+        "effective_rank": 1.0795807838439941,
+        "condition_number_log": 8.682036918163512,
+        "peak_failure_position": 1.0,
+        "weight_alignment": 0.9615750908851624,
+        "spectral_entropy": 0.17112059891223907,
+        "noise_std": 0.006737946999085467
+      }
+    },
+    {
+      "fitness": 237173887.0,
+      "condition_number": 39512649728.0,
+      "effective_rank": 1.0476000308990479,
+      "noise_std": 0.006737946999085467,
+      "descriptors": {
+        "effective_rank": 1.0476000308990479,
+        "condition_number_log": 8.68344693929834,
+        "peak_failure_position": 1.0,
+        "weight_alignment": 0.9576864242553711,
+        "spectral_entropy": 0.12083160132169724,
+        "noise_std": 0.006737946999085467
+      }
+    },
+    {
+      "fitness": 233804335.0,
+      "condition_number": 48697229312.0,
+      "effective_rank": 1.0536214113235474,
+      "noise_std": 0.006737946999085467,
+      "descriptors": {
+        "effective_rank": 1.0536214113235474,
+        "condition_number_log": 8.68751783261037,
+        "peak_failure_position": 1.0,
+        "weight_alignment": 0.9802389740943909,
+        "spectral_entropy": 0.13015548884868622,
+        "noise_std": 0.006737946999085467
+      }
+    },
+    {
+      "fitness": 233261151.0,
+      "condition_number": 46477021184.0,
+      "effective_rank": 1.1523844003677368,
+      "noise_std": 0.006737946999085467,
+      "descriptors": {
+        "effective_rank": 1.1523844003677368,
+        "condition_number_log": 8.667238312619705,
+        "peak_failure_position": 1.0,
+        "weight_alignment": 0.9785261750221252,
+        "spectral_entropy": 0.28683722019195557,
+        "noise_std": 0.006737946999085467
+      }
+    },
+    {
+      "fitness": 223085919.0,
+      "condition_number": 45571264512.0,
+      "effective_rank": 1.1966893672943115,
+      "noise_std": 0.006737946999085467,
+      "descriptors": {
+        "effective_rank": 1.1966893672943115,
+        "condition_number_log": 8.658691045135805,
+        "peak_failure_position": 1.0,
+        "weight_alignment": 0.9574140906333923,
+        "spectral_entropy": 0.3491620719432831,
+        "noise_std": 0.006737946999085467
+      }
+    }
+  ],
+  "correlations": {
+    "condition_number_log": NaN,
+    "spectral_entropy": 0.30898304550095923,
+    "condition_number": -0.30583302987847555,
+    "effective_rank": 0.30130345187820434,
+    "noise_std": 0.28014848502971096,
+    "peak_failure_position": -0.2345184257251291,
+    "weight_alignment": -0.08499913021880813
+  }
+}

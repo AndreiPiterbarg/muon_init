@@ -26,7 +26,11 @@ class EvalResult:
 def _eval_model_on_batch(model, xs, ys, device):
     """Run model forward pass, return predictions."""
     with torch.no_grad():
-        pred = model(xs.to(device), ys.to(device)).detach().cpu()
+        if device != "cpu" and device != torch.device("cpu"):
+            with torch.autocast(device_type="cuda", dtype=torch.float16):
+                pred = model(xs.to(device), ys.to(device)).detach().cpu()
+        else:
+            pred = model(xs.to(device), ys.to(device)).detach().cpu()
     return pred
 
 

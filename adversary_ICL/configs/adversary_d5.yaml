@@ -1,0 +1,53 @@
+# Adversarial search configuration for d=5 model
+# Usage: python -m src.adversary.run --config configs/adversary_d5.yaml
+
+icl_model:
+  run_path: "results/checkpoints/d5_6layer_150k"
+  step: -1
+
+task:
+  name: "noisy_linear_regression"
+  n_dims: 5
+  n_points: 11
+
+genome:
+  type: "pipeline"
+  n_stages: 8
+
+parsimony:
+  lambda: 0.0            # d=5: adversary converges to 1-stage (sorting_rank) at all lambdas.
+                          # Break is already maximally simple. Tune parsimony for d=20.
+  c_base: 1.0
+  c_stage: 1.0
+  c_affine: 1.0
+
+search:
+  budget: 50000
+  pop_size: 32
+  sigma_init: 0.3
+  num_restarts: 5
+  seed: 0
+  save_interval: 50
+
+eval:
+  batch_size: 64
+  num_batches: 10
+  baselines:
+    - "ridge"
+    - "least_squares"
+    - "averaging"
+
+diagnostics:
+  enabled: true
+  top_k: 5
+  run:
+    - "learning_curve"
+    - "algorithm_id"
+    - "weight_recovery"
+    - "attention"
+    - "linear_probing"
+    - "gradient_attribution"
+    - "pipeline_ablation"
+
+output:
+  save_dir: "results/adversary_runs/d5_pipeline"

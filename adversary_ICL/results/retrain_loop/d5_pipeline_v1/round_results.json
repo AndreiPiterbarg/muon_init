@@ -1,0 +1,16 @@
+{
+  "1": {
+    "best_fitness": 5.78847599029541,
+    "curriculum_size": 50,
+    "stopped": null
+  },
+  "2": {
+    "best_fitness": 3.6223416328430176,
+    "curriculum_size": 100,
+    "stopped": null
+  },
+  "3": {
+    "best_fitness": 6.794290065765381,
+    "stopped": "overlap"
+  }
+}

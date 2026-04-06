@@ -200,21 +200,27 @@ class LeastSquaresModel:
             if max(inds) >= ys.shape[1] or min(inds) < 0:
                 raise ValueError("inds contain indices where xs and ys are not defined")
 
+        bsize, n_points, n_dims = xs.shape
+
+        # Running XtX and Xty with rank-1 updates (avoids recomputing O(k*d^2) each step)
+        XtX = torch.zeros(bsize, n_dims, n_dims)
+        Xty = torch.zeros(bsize, n_dims, 1)
         preds = []
 
+        accumulated_up_to = 0
         for i in inds:
             if i == 0:
-                preds.append(torch.zeros_like(ys[:, 0]))  # predict zero for first point
+                preds.append(torch.zeros(bsize))
                 continue
-            train_xs, train_ys = xs[:, :i], ys[:, :i]
-            test_x = xs[:, i : i + 1]
+            # Accumulate any new examples since last prediction
+            while accumulated_up_to < i:
+                xk = xs[:, accumulated_up_to, :].unsqueeze(2)  # (bsize, d, 1)
+                XtX = XtX + xk @ xk.transpose(1, 2)
+                Xty = Xty + xk * ys[:, accumulated_up_to].view(bsize, 1, 1)
+                accumulated_up_to += 1
 
-            ws, _, _, _ = torch.linalg.lstsq(
-                train_xs, train_ys.unsqueeze(2), driver=self.driver
-            )
-
-            pred = test_x @ ws
-            preds.append(pred[:, 0, 0])
+            ws, _, _, _ = torch.linalg.lstsq(XtX, Xty, driver=self.driver)
+            preds.append((xs[:, i:i+1, :] @ ws)[:, 0, 0])
 
         return torch.stack(preds, dim=1)
 
@@ -239,24 +245,28 @@ class RidgeRegressionModel:
             if max(inds) >= ys.shape[1] or min(inds) < 0:
                 raise ValueError("inds contain indices where xs and ys are not defined")
 
-        preds = []
-        n_dims = xs.shape[2]
+        bsize, n_points, n_dims = xs.shape
+        reg = self.alpha * torch.eye(n_dims).unsqueeze(0).expand(bsize, -1, -1)
 
+        # Running XtX and Xty with rank-1 updates (avoids recomputing O(k*d^2) each step)
+        XtX = torch.zeros(bsize, n_dims, n_dims)
+        Xty = torch.zeros(bsize, n_dims, 1)
+        preds = []
+
+        accumulated_up_to = 0
         for i in inds:
             if i == 0:
-                preds.append(torch.zeros_like(ys[:, 0]))
+                preds.append(torch.zeros(bsize))
                 continue
-            train_xs, train_ys = xs[:, :i], ys[:, :i]
-            test_x = xs[:, i : i + 1]
+            # Accumulate any new examples since last prediction
+            while accumulated_up_to < i:
+                xk = xs[:, accumulated_up_to, :].unsqueeze(2)  # (bsize, d, 1)
+                XtX = XtX + xk @ xk.transpose(1, 2)
+                Xty = Xty + xk * ys[:, accumulated_up_to].view(bsize, 1, 1)
+                accumulated_up_to += 1
 
-            # w = (X^T X + alpha * I)^{-1} X^T y
-            XtX = torch.bmm(train_xs.transpose(1, 2), train_xs)
-            reg = self.alpha * torch.eye(n_dims).unsqueeze(0).expand(XtX.shape[0], -1, -1)
-            Xty = torch.bmm(train_xs.transpose(1, 2), train_ys.unsqueeze(2))
             ws = torch.linalg.solve(XtX + reg, Xty)
-
-            pred = torch.bmm(test_x, ws)
-            preds.append(pred[:, 0, 0])
+            preds.append((xs[:, i:i+1, :] @ ws)[:, 0, 0])
 
         return torch.stack(preds, dim=1)
 

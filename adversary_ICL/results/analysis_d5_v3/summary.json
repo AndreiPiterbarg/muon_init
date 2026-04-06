@@ -1,0 +1,237 @@
+{
+  "fitness_type": "mean_log_ratio_k1_to_d",
+  "total_evals": 10080,
+  "valid_evals": 10080,
+  "best_fitness": 17.966506958007812,
+  "mean_fitness": 5.747578444294373,
+  "median_fitness": 4.797515392303467,
+  "top_10": [
+    {
+      "fitness": 17.966506958007812,
+      "ratio_x": 63497237.43829491,
+      "condition_number": 31144261632.0,
+      "effective_rank": 1.9338386058807373,
+      "noise_std": 0.006737946999085467,
+      "spectrum": [
+        3.1144261360168457,
+        1.7947014570236206,
+        0.08367666602134705,
+        0.007195693906396627,
+        1.764641870813911e-16
+      ],
+      "descriptors": {
+        "effective_rank": 1.9338386058807373,
+        "condition_number_log": 8.49337805118471,
+        "peak_failure_position": 0.9,
+        "weight_alignment": 0.5471208691596985,
+        "spectral_entropy": 0.7405081987380981,
+        "noise_std": 0.006737946999085467
+      }
+    },
+    {
+      "fitness": 17.89197540283203,
+      "ratio_x": 58936750.583455764,
+      "condition_number": 41329401856.0,
+      "effective_rank": 1.4116054773330688,
+      "noise_std": 0.006737946999085467,
+      "spectrum": [
+        4.132940292358398,
+        0.7895288467407227,
+        0.07601190358400345,
+        0.0015188863035291433,
+        9.121969918315866e-16
+      ],
+      "descriptors": {
+        "effective_rank": 1.4116054773330688,
+        "condition_number_log": 8.616259084690569,
+        "peak_failure_position": 1.0,
+        "weight_alignment": 0.18507619202136993,
+        "spectral_entropy": 0.5149805545806885,
+        "noise_std": 0.006737946999085467
+      }
+    },
+    {
+      "fitness": 17.272289276123047,
+      "ratio_x": 31714649.96578907,
+      "condition_number": 41643757568.0,
+      "effective_rank": 1.38973867893219,
+      "noise_std": 0.006737946999085467,
+      "spectrum": [
+        4.1643757820129395,
+        0.8037077784538269,
+        0.03187859430909157,
+        3.780376573558897e-05,
+        1.7689579007268657e-15
+      ],
+      "descriptors": {
+        "effective_rank": 1.38973867893219,
+        "condition_number_log": 8.619549835826612,
+        "peak_failure_position": 1.0,
+        "weight_alignment": 0.016442060470581055,
+        "spectral_entropy": 0.47845783829689026,
+        "noise_std": 0.006737946999085467
+      }
+    },
+    {
+      "fitness": 16.87411117553711,
+      "ratio_x": 21297732.626152754,
+      "condition_number": 45408063488.0,
+      "effective_rank": 1.20114266872406,
+      "noise_std": 0.006737946999085467,
+      "spectrum": [
+        4.540806293487549,
+        0.44074809551239014,
+        0.018257707357406616,
+        0.00018780419486574829,
+        -8.260054602178307e-16
+      ],
+      "descriptors": {
+        "effective_rank": 1.20114266872406,
+        "condition_number_log": 8.657133017452436,
+        "peak_failure_position": 1.0,
+        "weight_alignment": 0.1606738120317459,
+        "spectral_entropy": 0.32245421409606934,
+        "noise_std": 0.006737946999085467
+      }
+    },
+    {
+      "fitness": 16.801570892333984,
+      "ratio_x": 19807493.671751373,
+      "condition_number": 43442987008.0,
+      "effective_rank": 1.2998237609863281,
+      "noise_std": 0.006737946999085467,
+      "spectrum": [
+        4.344298839569092,
+        0.5982456207275391,
+        0.04980580881237984,
+        0.007649600505828857,
+        -1.6031476609688147e-17
+      ],
+      "descriptors": {
+        "effective_rank": 1.2998237609863281,
+        "condition_number_log": 8.637919697292629,
+        "peak_failure_position": 1.0,
+        "weight_alignment": 0.5509018898010254,
+        "spectral_entropy": 0.4320060610771179,
+        "noise_std": 0.006737946999085467
+      }
+    },
+    {
+      "fitness": 16.78059959411621,
+      "ratio_x": 19396430.148093347,
+      "condition_number": 44645298176.0,
+      "effective_rank": 1.2378854751586914,
+      "noise_std": 0.006737946999085467,
+      "spectrum": [
+        4.464529991149902,
+        0.5130235552787781,
+        0.02244635298848152,
+        5.22170839900582e-09,
+        -1.3733184367481499e-08
+      ],
+      "descriptors": {
+        "effective_rank": 1.2378854751586914,
+        "condition_number_log": NaN,
+        "peak_failure_position": 1.0,
+        "weight_alignment": 0.06724319607019424,
+        "spectral_entropy": 0.35902994871139526,
+        "noise_std": 0.006737946999085467
+      }
+    },
+    {
+      "fitness": 16.58124351501465,
+      "ratio_x": 15890682.911287267,
+      "condition_number": 49256091648.0,
+      "effective_rank": 1.0302009582519531,
+      "noise_std": 0.006737946999085467,
+      "spectrum": [
+        4.925609111785889,
+        0.07402101159095764,
+        0.00025238419766537845,
+        0.00011742659989977255,
+        3.872476610262439e-16
+      ],
+      "descriptors": {
+        "effective_rank": 1.0302009582519531,
+        "condition_number_log": 8.692459959690119,
+        "peak_failure_position": 1.0,
+        "weight_alignment": 0.2033873349428177,
+        "spectral_entropy": 0.07788438349962234,
+        "noise_std": 0.006737946999085467
+      }
+    },
+    {
+      "fitness": 16.482349395751953,
+      "ratio_x": 14394394.180798782,
+      "condition_number": 30474838016.0,
+      "effective_rank": 2.039658308029175,
+      "noise_std": 0.006737946999085467,
+      "spectrum": [
+        3.0474839210510254,
+        1.711368441581726,
+        0.19783975183963776,
+        0.0433080717921257,
+        1.5917186387940676e-16
+      ],
+      "descriptors": {
+        "effective_rank": 2.039658308029175,
+        "condition_number_log": 8.483941412772957,
+        "peak_failure_position": 1.0,
+        "weight_alignment": 0.6417452096939087,
+        "spectral_entropy": 0.8376687169075012,
+        "noise_std": 0.006737946999085467
+      }
+    },
+    {
+      "fitness": 16.462841033935547,
+      "ratio_x": 14116304.487637756,
+      "condition_number": 47725912064.0,
+      "effective_rank": 1.0955705642700195,
+      "noise_std": 0.006737946999085467,
+      "spectrum": [
+        4.7725911140441895,
+        0.20233048498630524,
+        0.02432129718363285,
+        0.0007569168228656054,
+        -3.9520545615635925e-16
+      ],
+      "descriptors": {
+        "effective_rank": 1.0955705642700195,
+        "condition_number_log": 8.67875422247909,
+        "peak_failure_position": 1.0,
+        "weight_alignment": 0.09585203975439072,
+        "spectral_entropy": 0.20145565271377563,
+        "noise_std": 0.006737946999085467
+      }
+    },
+    {
+      "fitness": 16.348491668701172,
+      "ratio_x": 12590985.36570746,
+      "condition_number": 38006046720.0,
+      "effective_rank": 1.6236939430236816,
+      "noise_std": 0.006737946999085467,
+      "spectrum": [
+        3.800604820251465,
+        0.9481610059738159,
+        0.23007744550704956,
+        0.02115696482360363,
+        1.5109995223547257e-15
+      ],
+      "descriptors": {
+        "effective_rank": 1.6236939430236816,
+        "condition_number_log": 8.579852640522219,
+        "peak_failure_position": 1.0,
+        "weight_alignment": 0.7724360823631287,
+        "spectral_entropy": 0.6885766983032227,
+        "noise_std": 0.006737946999085467
+      }
+    }
+  ],
+  "correlations": {
+    "noise_std": 0.09387847755532974,
+    "condition_number": -0.09384697185118712,
+    "peak_failure_position": -0.04809572278074258,
+    "effective_rank": 0.008818946901244008,
+    "weight_alignment": 0.0016463749236130514
+  }
+}
