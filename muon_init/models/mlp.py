@@ -1,7 +1,7 @@
 """Deep MLP for CIFAR-10 (flattened input).
 
 8-layer MLP, hidden dim 256, ReLU, no BatchNorm, no skip connections.
-~600K params, nearly 100% Muon-eligible 2D weight matrices.
+~1.2M params, nearly 100% Muon-eligible 2D weight matrices.
 """
 
 import torch.nn as nn
