@@ -50,6 +50,17 @@ _ALPHA_VALUES = {
 for _name, _alpha in _ALPHA_VALUES.items():
     INIT_REGISTRY[_name] = (lambda a: lambda model: scaled_orthogonal(model, alpha=a))(_alpha)
 
+# Sharpness-aware init: alpha derived from EoS condition eta*lambda_max < 2.
+# These are pre-computed from Phase 2 fits (see experiments/results/phase2_fits/).
+_SHARPNESS_AWARE_ALPHAS = {
+    "sharpness_eos_mlp": 1.34,       # Grid search: deep_mlp, eta=0.02
+    "sharpness_eos_mlp_fit": 1.395,   # Power law fit: deep_mlp
+    "sharpness_eos_mlp_analytical": 1.298,  # Analytical formula: deep_mlp
+    "sharpness_eos_vit": 0.14,        # Grid search: vit_tiny, eta=0.02
+}
+for _name, _alpha in _SHARPNESS_AWARE_ALPHAS.items():
+    INIT_REGISTRY[_name] = (lambda a: lambda model: scaled_orthogonal(model, alpha=a))(_alpha)
+
 
 def get_lr(step, warmup_steps, max_lr, total_steps, min_lr=0.0):
     """Linear warmup + cosine decay."""
@@ -58,6 +69,13 @@ def get_lr(step, warmup_steps, max_lr, total_steps, min_lr=0.0):
         return max_lr * (step + 1) / max(warmup_steps, 1)
     progress = (step - warmup_steps) / max(total_steps - warmup_steps, 1)
     return min_lr + 0.5 * (max_lr - min_lr) * (1 + math.cos(math.pi * progress))
+
+
+def get_momentum(step, momentum_warmup_steps, momentum_start, momentum_end):
+    """Linear momentum warmup: ramp beta from momentum_start to momentum_end."""
+    if momentum_warmup_steps <= 0 or step >= momentum_warmup_steps:
+        return momentum_end
+    return momentum_start + (momentum_end - momentum_start) * step / momentum_warmup_steps
 
 
 def split_params(model, model_name):
@@ -74,7 +92,7 @@ def split_params(model, model_name):
             continue
 
         is_embedding = "emb" in name or "tok_emb" in name or "pos_emb" in name
-        is_head = name.endswith("head.weight") and model_name in ("nanogpt", "deep_narrow_gpt")
+        is_head = name.endswith("head.weight")
         is_norm = "norm" in name or "bn" in name or "ln" in name
         is_bias = name.endswith(".bias")
         is_cls = "cls_token" in name
@@ -219,6 +237,15 @@ def train(config):
             else:
                 group["lr"] = lr_adam
 
+        # Set momentum (with optional warmup).
+        momentum_end = train_cfg.get("momentum", 0.95)
+        momentum_warmup_steps = train_cfg.get("momentum_warmup_steps", 0)
+        momentum_start = train_cfg.get("momentum_start", 0.85)
+        current_beta = get_momentum(step, momentum_warmup_steps,
+                                    momentum_start, momentum_end)
+        if hasattr(optimizer, "set_momentum"):
+            optimizer.set_momentum(current_beta)
+
         # Forward + backward.
         if is_lm:
             x, y = batch[0].to(device), batch[1].to(device)
@@ -237,7 +264,8 @@ def train(config):
         if step % log_every == 0:
             elapsed = time.time() - t0
             entry = {"step": step, "train_loss": loss.item(),
-                     "lr_muon": lr_muon, "lr_adam": lr_adam, "time": elapsed}
+                     "lr_muon": lr_muon, "lr_adam": lr_adam,
+                     "momentum": current_beta, "time": elapsed}
             results["log"].append(entry)
             print(f"[step {step}/{total_steps}] loss={loss.item():.4f} "
                   f"lr_muon={lr_muon:.6f} time={elapsed:.1f}s")
@@ -254,7 +282,9 @@ def train(config):
             print(f"  EVAL: {val_metrics}")
 
     # Save results.
-    run_name = f"{model_name}_{init_name}_warmup{warmup_steps}_seed{seed}"
+    mom_warmup = train_cfg.get("momentum_warmup_steps", 0)
+    mom_suffix = f"_momwarmup{mom_warmup}" if mom_warmup > 0 else ""
+    run_name = f"{model_name}_{init_name}_warmup{warmup_steps}{mom_suffix}_seed{seed}"
     results_path = os.path.join(save_dir, f"{run_name}.json")
     with open(results_path, "w") as f:
         json.dump(results, f, indent=2, default=str)
@@ -272,6 +302,10 @@ def main():
                         help="Override warmup steps")
     parser.add_argument("--seed", type=int, default=None,
                         help="Override random seed")
+    parser.add_argument("--momentum_warmup_steps", type=int, default=None,
+                        help="Override momentum warmup steps (0=no momentum warmup)")
+    parser.add_argument("--save_dir", type=str, default=None,
+                        help="Override results save directory")
     parser.add_argument("--use_muon", action="store_true", default=None)
     parser.add_argument("--no_muon", action="store_true")
     args = parser.parse_args()
@@ -286,6 +320,10 @@ def main():
         config["training"]["warmup_steps"] = args.warmup_steps
     if args.seed is not None:
         config["seed"] = args.seed
+    if args.momentum_warmup_steps is not None:
+        config["training"]["momentum_warmup_steps"] = args.momentum_warmup_steps
+    if args.save_dir is not None:
+        config["save_dir"] = args.save_dir
     if args.use_muon:
         config["use_muon"] = True
     if args.no_muon:

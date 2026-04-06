@@ -187,7 +187,8 @@ class MuonAdamW(Optimizer):
         param_groups = [
             dict(params=muon_params, lr=lr_muon, momentum=momentum,
                  nesterov=nesterov, ns_steps=ns_steps,
-                 weight_decay=weight_decay_muon, use_muon=True),
+                 weight_decay=weight_decay_muon, use_muon=True,
+                 _momentum_current=momentum),
             dict(params=adam_params, lr=lr_adam, betas=betas_adam,
                  eps=eps_adam, weight_decay=weight_decay_adam, use_muon=False),
         ]
@@ -210,9 +211,15 @@ class MuonAdamW(Optimizer):
 
         return loss
 
+    def set_momentum(self, beta):
+        """Set Muon momentum for the current step (called from training loop)."""
+        for group in self.param_groups:
+            if group.get("use_muon", False):
+                group["_momentum_current"] = beta
+
     def _step_muon(self, group):
         lr = group["lr"]
-        beta = group["momentum"]
+        beta = group["_momentum_current"]
         nesterov = group["nesterov"]
         ns_steps = group["ns_steps"]
         wd = group["weight_decay"]
