@@ -129,9 +129,19 @@ class GenomeEvaluator:
         # pool_dict needs shape (num_tasks, n_dims, 1)
         pool_dict = {"w": w.unsqueeze(0).unsqueeze(-1).expand(self.batch_size, -1, -1)}
 
+        # Bayes-optimal oracle baseline (per-genome).
+        # Likelihood: y|x,w ~ N(w^T x, sigma^2). Adversary forces ||w||=1, so under
+        # the uniform-on-sphere prior the per-coordinate variance is 1/d, giving the
+        # closed-form posterior mean w_hat = (X^T X + alpha* I)^-1 X^T y with
+        # alpha* = sigma^2 / (1/d) = d * sigma^2. This is the tightest estimator
+        # given the true generative model at test time.
+        alpha_oracle = float(self.n_dims) * (float(noise_std) ** 2)
+        oracle_baseline = models.RidgeRegressionModel(alpha=alpha_oracle)
+        per_genome_baselines = list(self.baselines) + [("oracle", oracle_baseline)]
+
         # Collect metrics across batches
         all_icl_err = []
-        all_baseline_err = {name: [] for name, _ in self.baselines}
+        all_baseline_err = {name: [] for name, _ in per_genome_baselines}
 
         for _ in range(self.num_batches):
             if is_pipeline:
@@ -163,8 +173,8 @@ class GenomeEvaluator:
             icl_err = ((pred_icl - ys) ** 2).mean(dim=0)  # (n_points,)
             all_icl_err.append(icl_err)
 
-            # Baselines
-            for name, baseline in self.baselines:
+            # Baselines (including per-genome Bayes-optimal oracle)
+            for name, baseline in per_genome_baselines:
                 pred_bl = baseline(xs, ys)
                 bl_err = ((pred_bl - ys) ** 2).mean(dim=0)
                 all_baseline_err[name].append(bl_err)
