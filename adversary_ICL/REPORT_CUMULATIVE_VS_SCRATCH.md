@@ -11,7 +11,7 @@ The adversarial agent I worked on is an automated search procedure that finds in
 ### 2.1 Representation: Compositional Pipeline Genomes
 
 The first critical choice is **what the adversary is allowed to propose**. A naive adversary might directly output a covariance matrix, but this is too unstructured -- it can only produce Gaussian distributions, and the space is high-dimensional with poor geometry for optimization. Instead, each candidate distribution is encoded as a **pipeline genome**: a flat real-valued vector that decodes into a compositional transform pipeline.
-
+LET
 The pipeline structure:
 
 ```
