@@ -4,16 +4,14 @@ Matches Section 4 / Appendix B.2 of Liu et al. 2023 for the baseline sweep:
   * AdamW, (beta1, beta2) = (0.9, 0.999), weight_decay = 0.1
   * learning rate 3e-4, 50-step linear warmup, linear decay to 0 at step 10001
   * batch size 16, 10000 steps (~81.9M training tokens at T = 512)
-  * Train on FFL(0.8); evaluate in-distribution FFL(0.8), sparse FFL(0.98),
-    dense FFL(0.1).
-"""
-from __future__ import annotations
+  * Train on FFL(0.8); evaluate FFL(0.8) / FFL(0.98) / FFL(0.1).
 
+Entry point: flip_flop/scripts/run_baseline.py.
+"""
 import json
 import os
 import time
 from dataclasses import dataclass
-from typing import Any
 
 import numpy as np
 import torch
@@ -58,77 +56,80 @@ class TrainConfig:
     train_steps: int = 10_000
     decay_end_step: int = 10_001  # LR reaches 0 here
     batch_size: int = 16
+    grad_clip: float = 1.0  # matches HF / x-transformers default; prevents divergence spikes
     # logging / i/o
     seed: int = 0
     eval_every: int = 500
-    training_eval_subset: int = 1000  # per paper: ~1% subset during training
+    training_eval_subset: int = 1000  # paper: "first 1% of (ii)" during training
     log_every: int = 50
     save_every: int = 2000
     eval_batch_size: int = 64
     out_dir: str = "results/flip_flop/baseline"
     device: str = "auto"
+    # optional: continue training from an existing checkpoint (used by retrain loop)
+    init_from_ckpt: str = ""
 
     @classmethod
-    def from_yaml(cls, path: str) -> "TrainConfig":
-        with open(path, "r") as f:
+    def from_yaml(cls, path):
+        with open(path) as f:
             raw = yaml.safe_load(f)
-        return cls.from_dict(raw)
-
-    @classmethod
-    def from_dict(cls, raw: dict[str, Any]) -> "TrainConfig":
-        flat: dict[str, Any] = {}
-        for section in ("model", "data", "training", "output"):
-            if section in raw and isinstance(raw[section], dict):
-                flat.update(raw[section])
-        # Allow top-level overrides too.
-        for k, v in raw.items():
-            if not isinstance(v, dict):
-                flat[k] = v
-        # Filter to known fields.
-        known = {f for f in cls.__dataclass_fields__}
+        flat = {}
+        for section in raw.values():
+            if isinstance(section, dict):
+                flat.update(section)
+        known = {f.name for f in cls.__dataclass_fields__.values()}
         flat = {k: v for k, v in flat.items() if k in known}
         return cls(**flat)
 
 
-def _resolve_device(want: str) -> str:
-    if want == "auto":
-        return "cuda" if torch.cuda.is_available() else "cpu"
-    return want
-
-
-def _make_lr_lambda(warmup: int, decay_end: int):
+def _make_lr_lambda(warmup, decay_end):
     """Linear warmup then linear decay; step `decay_end` maps to 0."""
-    def lr_lambda(step: int) -> float:
+    def lr_lambda(step):
         if step < warmup:
-            return float(step) / float(max(1, warmup))
-        remaining = decay_end - step
-        total = decay_end - warmup
-        return max(0.0, remaining / max(1, total))
+            return step / max(1, warmup)
+        return max(0.0, (decay_end - step) / max(1, decay_end - warmup))
     return lr_lambda
 
 
-def _seed_all(seed: int) -> None:
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed_all(seed)
+def _run_eval(model, eval_sets, cfg, device, step, fh, subset=None):
+    out = {"step": step, "subset": subset}
+    for name, ds in eval_sets.items():
+        view = ds if subset is None else ds[: min(subset, len(ds))]
+        res = evaluate_dataset(model, view, batch_size=cfg.eval_batch_size, device=device)
+        out[name] = res
+        print(
+            f"  eval@{step} {name}: err={res['error_rate']:.3e} "
+            f"({res['num_errors']}/{res['num_predictions']}) loss={res['loss']:.4f}"
+        )
+    fh.write(json.dumps(out) + "\n")
+    fh.flush()
+    return out
 
 
-def train(cfg: TrainConfig) -> dict:
-    device = _resolve_device(cfg.device)
+def train(cfg, sampler=None):
+    """Train the model. If `sampler` is provided (a callable `(batch_size, rng) ->
+    LongTensor`), it replaces the default FFL(cfg.train_p_i) sampler — used by
+    the retrain loop to inject MixedSampler. If `cfg.init_from_ckpt` is set,
+    the model weights are loaded from that path before training (continue-train).
+    """
+    device = ("cuda" if torch.cuda.is_available() else "cpu") if cfg.device == "auto" else cfg.device
     os.makedirs(cfg.out_dir, exist_ok=True)
-    _seed_all(cfg.seed)
+    np.random.seed(cfg.seed)
+    torch.manual_seed(cfg.seed)
 
-    # Persist the resolved config for reproducibility.
     with open(os.path.join(cfg.out_dir, "config.yaml"), "w") as f:
         yaml.safe_dump(cfg.__dict__, f, sort_keys=False)
 
-    # Model
     model = build_model(cfg).to(device)
-    n_params = model.num_parameters()
+    if cfg.init_from_ckpt:
+        sd = torch.load(cfg.init_from_ckpt, map_location=device)
+        if isinstance(sd, dict) and "model_state_dict" in sd:
+            sd = sd["model_state_dict"]
+        model.load_state_dict(sd)
+        print(f"[flip_flop] loaded weights from {cfg.init_from_ckpt}")
+    n_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print(f"[flip_flop] model={model.name} params={n_params:,}")
 
-    # Optimizer + LR schedule (AdamW with uniform weight decay, per paper).
     optimizer = torch.optim.AdamW(
         model.parameters(),
         lr=cfg.lr,
@@ -139,59 +140,45 @@ def train(cfg: TrainConfig) -> dict:
         optimizer, _make_lr_lambda(cfg.warmup_steps, cfg.decay_end_step)
     )
 
-    # Eval sets (fixed across training)
     print("[flip_flop] building eval datasets...")
     eval_sets = {
-        "in_distribution": make_eval_dataset(
-            cfg.eval_in_p_i, cfg.eval_in_n, cfg.seq_len, cfg.eval_seed
-        ),
-        "sparse_tail": make_eval_dataset(
-            cfg.eval_sparse_p_i, cfg.eval_sparse_n, cfg.seq_len, cfg.eval_seed + 1
-        ),
-        "dense_tail": make_eval_dataset(
-            cfg.eval_dense_p_i, cfg.eval_dense_n, cfg.seq_len, cfg.eval_seed + 2
-        ),
+        "in_distribution": make_eval_dataset(cfg.eval_in_p_i, cfg.eval_in_n, cfg.seq_len, cfg.eval_seed),
+        "sparse_tail": make_eval_dataset(cfg.eval_sparse_p_i, cfg.eval_sparse_n, cfg.seq_len, cfg.eval_seed + 1),
+        "dense_tail": make_eval_dataset(cfg.eval_dense_p_i, cfg.eval_dense_n, cfg.seq_len, cfg.eval_seed + 2),
     }
-
-    # Separate RNG for training so eval seeds don't collide
     train_rng = np.random.default_rng(cfg.seed + 100)
 
-    log_path = os.path.join(cfg.out_dir, "train_log.jsonl")
-    eval_path = os.path.join(cfg.out_dir, "eval_log.jsonl")
-    log_fh = open(log_path, "a")
-    eval_fh = open(eval_path, "a")
+    log_fh = open(os.path.join(cfg.out_dir, "train_log.jsonl"), "a")
+    eval_fh = open(os.path.join(cfg.out_dir, "eval_log.jsonl"), "a")
 
     model.train()
     t0 = time.time()
     last_loss = float("nan")
 
+    if sampler is None:
+        def sampler(bs, rng):
+            return sample_ffl(cfg.seq_len, cfg.train_p_i, bs, rng)
+
     try:
         for step in range(cfg.train_steps):
-            tokens = sample_ffl(
-                cfg.seq_len, cfg.train_p_i, cfg.batch_size, train_rng
-            ).to(device)
-            logits = model(tokens)
-            loss = clean_loss(logits, tokens)
+            tokens = sampler(cfg.batch_size, train_rng).to(device)
+            loss = clean_loss(model(tokens), tokens)
 
             optimizer.zero_grad(set_to_none=True)
             loss.backward()
+            if cfg.grad_clip > 0:
+                torch.nn.utils.clip_grad_norm_(model.parameters(), cfg.grad_clip)
             optimizer.step()
             scheduler.step()
 
             last_loss = float(loss.item())
             if step % cfg.log_every == 0:
-                rec = {
-                    "step": step,
-                    "loss": last_loss,
-                    "lr": float(scheduler.get_last_lr()[0]),
-                    "elapsed": time.time() - t0,
-                }
+                rec = {"step": step, "loss": last_loss,
+                       "lr": float(scheduler.get_last_lr()[0]),
+                       "elapsed": time.time() - t0}
                 log_fh.write(json.dumps(rec) + "\n")
                 log_fh.flush()
-                print(
-                    f"[step {step:>6d}] loss={last_loss:.4f} "
-                    f"lr={rec['lr']:.2e} t={rec['elapsed']:.1f}s"
-                )
+                print(f"[step {step:>6d}] loss={last_loss:.4f} lr={rec['lr']:.2e} t={rec['elapsed']:.1f}s")
 
             if cfg.eval_every > 0 and (step + 1) % cfg.eval_every == 0:
                 _run_eval(model, eval_sets, cfg, device, step + 1, eval_fh,
@@ -199,75 +186,18 @@ def train(cfg: TrainConfig) -> dict:
                 model.train()
 
             if cfg.save_every > 0 and (step + 1) % cfg.save_every == 0:
-                ckpt = {
-                    "step": step + 1,
-                    "model_state_dict": model.state_dict(),
-                    "optimizer_state_dict": optimizer.state_dict(),
-                    "scheduler_state_dict": scheduler.state_dict(),
-                }
-                torch.save(ckpt, os.path.join(cfg.out_dir, "state.pt"))
+                torch.save(
+                    {"step": step + 1, "model_state_dict": model.state_dict(),
+                     "optimizer_state_dict": optimizer.state_dict(),
+                     "scheduler_state_dict": scheduler.state_dict()},
+                    os.path.join(cfg.out_dir, "state.pt"),
+                )
 
-        # Final eval + checkpoint
         final = _run_eval(model, eval_sets, cfg, device, cfg.train_steps, eval_fh)
-        torch.save(
-            {
-                "step": cfg.train_steps,
-                "model_state_dict": model.state_dict(),
-                "optimizer_state_dict": optimizer.state_dict(),
-                "scheduler_state_dict": scheduler.state_dict(),
-            },
-            os.path.join(cfg.out_dir, "model_final.pt"),
-        )
+        torch.save({"step": cfg.train_steps, "model_state_dict": model.state_dict()},
+                   os.path.join(cfg.out_dir, "model_final.pt"))
     finally:
         log_fh.close()
         eval_fh.close()
 
     return {"final_eval": final, "last_loss": last_loss, "num_params": n_params}
-
-
-def _run_eval(model, eval_sets, cfg, device, step, fh, subset=None) -> dict:
-    out = {"step": step, "subset": subset}
-    for name, ds in eval_sets.items():
-        view = ds if subset is None else ds[: min(subset, len(ds))]
-        res = evaluate_dataset(model, view, batch_size=cfg.eval_batch_size, device=device)
-        out[name] = res.to_dict()
-        print(
-            f"  eval@{step} {name}: err={res.error_rate:.3e} "
-            f"({res.num_errors}/{res.num_predictions}) loss={res.loss:.4f}"
-        )
-    fh.write(json.dumps(out) + "\n")
-    fh.flush()
-    return out
-
-
-def main():
-    import argparse
-
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--config", required=True)
-    parser.add_argument("--out_dir", default=None, help="override out_dir in config")
-    parser.add_argument("--seed", type=int, default=None)
-    parser.add_argument("--test_run", action="store_true",
-                        help="short smoke-test (100 steps, small eval sets)")
-    args = parser.parse_args()
-
-    cfg = TrainConfig.from_yaml(args.config)
-    if args.out_dir is not None:
-        cfg.out_dir = args.out_dir
-    if args.seed is not None:
-        cfg.seed = args.seed
-    if args.test_run:
-        cfg.train_steps = 100
-        cfg.decay_end_step = 101
-        cfg.warmup_steps = 10
-        cfg.eval_in_n = 64
-        cfg.eval_sparse_n = 256
-        cfg.eval_dense_n = 64
-        cfg.eval_every = 50
-        cfg.save_every = 0
-
-    train(cfg)
-
-
-if __name__ == "__main__":
-    main()

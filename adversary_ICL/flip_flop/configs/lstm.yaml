@@ -6,7 +6,6 @@ model:
   vocab_size: 5
   hidden_size: 128
   num_layers: 1
-  dropout: 0.0
 
 data:
   seq_len: 512
@@ -28,6 +27,7 @@ training:
   train_steps: 500            # paper: 20x fewer steps than the Transformer
   decay_end_step: 501
   batch_size: 16
+  grad_clip: 1.0
   seed: 0
   eval_every: 100
   training_eval_subset: 1000

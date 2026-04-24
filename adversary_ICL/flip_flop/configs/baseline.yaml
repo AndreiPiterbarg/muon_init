@@ -32,6 +32,7 @@ training:
   train_steps: 10000
   decay_end_step: 10001       # LR hits 0 at this step (paper convention)
   batch_size: 16
+  grad_clip: 1.0              # HF / x-transformers default; paper doesn't specify but needed for stability
   seed: 0
   eval_every: 500
   training_eval_subset: 1000  # paper: "first 1% of (ii)" during training
