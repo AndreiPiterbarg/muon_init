@@ -1,0 +1,22 @@
+Step 2B R4 multi-seed eval (n=10000, eval_seed=9999)
+
+Standard FFL battery (from each model's eval_log.jsonl, step=10000):
+  R4_seed0: in=0.0000% sparse(0.98)=0.0000% dense(0.1)=0.0000%
+  R4_seed1: in=0.0000% sparse(0.98)=0.0000% dense(0.1)=0.0000%
+  R4_seed2: in=0.0000% sparse(0.98)=0.0000% dense(0.1)=0.0000%
+
+family                              | R4_seed0       | R4_seed1       | R4_seed2      
+--------------------------------------------------------------------------------------
+planted_decoy_a1.00_n2              |       0.0000% |       0.0000% |       0.0000%
+piecewise_c02_a1.00                 |       0.0024% |       0.0008% |       0.0000%
+stationary_c00_a1.00                |       0.0000% |       0.0000% |       0.0000%
+piecewise_c00_a1.00                 |       1.7217% |       1.4130% |       2.7418%
+piecewise_c01_a1.00                 |       0.0016% |       0.0000% |       0.0000%
+
+PASS CRITERION (Step 2B):
+  R4_seed0 on piecewise_c00_a1.00: 1.7217%
+  R4_seed1 on piecewise_c00_a1.00: 1.4130%
+  R4_seed2 on piecewise_c00_a1.00: 2.7418%
+  All three R4 seeds >= 0.5% on piecewise_c00? True
+  All three R4 seeds < 0.5% on c01 and c02?    True
+  PASS: True

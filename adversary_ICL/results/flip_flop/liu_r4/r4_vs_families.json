@@ -1,0 +1,35 @@
+{
+  "n_samples": 10000,
+  "eval_seed": 9999,
+  "sampler_source": "results_tier1_v2/results/flip_flop/retrain/round_2_redone/sampler.json",
+  "results": {
+    "baseline": {
+      "planted_decoy_a1.00_n2": 0.0,
+      "piecewise_c02_a1.00": 0.13163424885152966,
+      "stationary_c00_a1.00": 0.0668101340115426,
+      "piecewise_c00_a1.00": 0.11910613655670625,
+      "piecewise_c01_a1.00": 0.13079566773344264
+    },
+    "R2-redone-v2": {
+      "planted_decoy_a1.00_n2": 0.0,
+      "piecewise_c02_a1.00": 0.00021177467174925878,
+      "stationary_c00_a1.00": 0.0025852070261734744,
+      "piecewise_c00_a1.00": 0.00028533075671013637,
+      "piecewise_c01_a1.00": 0.0001891819457363119
+    },
+    "R4": {
+      "planted_decoy_a1.00_n2": 0.0,
+      "piecewise_c02_a1.00": 2.44355390479914e-05,
+      "stationary_c00_a1.00": 0.0,
+      "piecewise_c00_a1.00": 0.017217117251486638,
+      "piecewise_c01_a1.00": 1.5765162144692657e-05
+    }
+  },
+  "family_axes": {
+    "planted_decoy_a1.00_n2": "planted",
+    "piecewise_c02_a1.00": "piecewise",
+    "stationary_c00_a1.00": "stationary",
+    "piecewise_c00_a1.00": "piecewise",
+    "piecewise_c01_a1.00": "piecewise"
+  }
+}

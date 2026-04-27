@@ -1,0 +1,16 @@
+Step 3 neighborhood escalation around piecewise_c00_a1.00
+  n_samples=2000, n_valid=60, n_invalid=0, threshold=0%
+
+Fraction of valid jittered configs with glitch >= 0.5%:
+  baseline      : 100.00% (60/60)
+  R2-redone-v2  :   0.00% (0/60)
+  R4            :  98.33% (59/60)
+
+  R4 / R2-v2 ratio = inf (R2-v2 fraction = 0)
+  Region (R4 high, R2-v2 low) verdict: True
+
+Per-segment-jittered breakdown:
+  seg 0: n=13  baseline=9.2862%  R2-redone-v2=0.0364%  R4=1.5293%
+  seg 1: n=18  baseline=12.6420%  R2-redone-v2=0.0363%  R4=1.4053%
+  seg 2: n=15  baseline=12.3245%  R2-redone-v2=0.0333%  R4=1.2307%
+  seg 3: n=14  baseline=11.8264%  R2-redone-v2=0.0339%  R4=1.5092%

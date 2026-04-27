@@ -1,0 +1,55 @@
+{
+  "n_samples": 10000,
+  "eval_seed": 9999,
+  "sampler_source": "results_tier1_v2/results/flip_flop/retrain/round_2_redone/sampler.json",
+  "results": {
+    "R4_seed0": {
+      "planted_decoy_a1.00_n2": 0.0,
+      "piecewise_c02_a1.00": 2.44355390479914e-05,
+      "stationary_c00_a1.00": 0.0,
+      "piecewise_c00_a1.00": 0.017217117251486638,
+      "piecewise_c01_a1.00": 1.5765162144692657e-05
+    },
+    "R4_seed1": {
+      "planted_decoy_a1.00_n2": 0.0,
+      "piecewise_c02_a1.00": 8.1451796826638e-06,
+      "stationary_c00_a1.00": 0.0,
+      "piecewise_c00_a1.00": 0.014130357247076982,
+      "piecewise_c01_a1.00": 0.0
+    },
+    "R4_seed2": {
+      "planted_decoy_a1.00_n2": 0.0,
+      "piecewise_c02_a1.00": 0.0,
+      "stationary_c00_a1.00": 0.0,
+      "piecewise_c00_a1.00": 0.027417691803874013,
+      "piecewise_c01_a1.00": 0.0
+    }
+  },
+  "ffl_battery": {
+    "R4_seed0": {
+      "step": 10000,
+      "in_distribution": 0.0,
+      "sparse_tail": 0.0,
+      "dense_tail": 0.0
+    },
+    "R4_seed1": {
+      "step": 10000,
+      "in_distribution": 0.0,
+      "sparse_tail": 0.0,
+      "dense_tail": 0.0
+    },
+    "R4_seed2": {
+      "step": 10000,
+      "in_distribution": 0.0,
+      "sparse_tail": 0.0,
+      "dense_tail": 0.0
+    }
+  },
+  "family_axes": {
+    "planted_decoy_a1.00_n2": "planted",
+    "piecewise_c02_a1.00": "piecewise",
+    "stationary_c00_a1.00": "stationary",
+    "piecewise_c00_a1.00": "piecewise",
+    "piecewise_c01_a1.00": "piecewise"
+  }
+}

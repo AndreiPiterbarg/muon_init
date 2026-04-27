@@ -1,0 +1,13 @@
+Step 1b sanity check: weighted-per-position vs scalar evaluate_dataset
+(should be exactly equal modulo float ordering)
+
+  piecewise_c00_a1.00: scalar=0.016421 weighted_per_pos=0.016421 abs_diff=0.00e+00 (num_errors=2523, num_reads=153641)
+  piecewise_c01_a1.00: scalar=0.000008 weighted_per_pos=0.000008 abs_diff=0.00e+00 (num_errors=1, num_reads=127439)
+  piecewise_c02_a1.00: scalar=0.000000 weighted_per_pos=0.000000 abs_diff=0.00e+00 (num_errors=0, num_reads=123306)
+
+Step 1d: per-segment glitch on piecewise_c00 (R4 seed=0, n=10000)
+  seg       tok_range      p_w      p_r      p_i   bit_p1    reads    errs     glitch
+    0  [  0,128)   0.7829   0.2169   0.0002   0.4620   136242       0    0.0000%
+    1  [128,256)   0.9903   0.0093   0.0004   0.4450     6037       0    0.0000%
+    2  [256,384)   0.9811   0.0005   0.0183   0.9749      336       0    0.0000%
+    3  [384,511)   0.0142   0.0015   0.9843   0.0655    11026    2523   22.8823%

@@ -227,6 +227,32 @@ def test_three_tail_score_penalizes_each_tail():
             assert "lambda_01" in r
 
 
+def test_r4_mix_sampler_produces_uniform_mixture():
+    """Liu R4 control: uniform per-sequence draw from 3 stationary FFL distributions."""
+    from flip_flop.adversary.r4_sampler import R4MixSampler, R4_PAPER_PIs
+    from flip_flop.data import W
+    sampler = R4MixSampler(T=64, p_i_values=R4_PAPER_PIs)
+    rng = np.random.default_rng(0)
+    tokens = sampler(2048, rng)
+    # Validity
+    x = tokens.numpy()
+    assert (x[:, 0] == W).all()
+    # Each p_i is FFL(p_i): write density = (1 - p_i)/2.
+    # With uniform 1/3 mix of 0.1, 0.9, 0.98, expected mean write density:
+    #   E = (1/3)(1-0.1)/2 + (1/3)(1-0.9)/2 + (1/3)(1-0.98)/2
+    #   E = (1/3)(0.45 + 0.05 + 0.01) ≈ 0.17
+    inst = x[:, 0::2]
+    write_density = (inst == W).mean()
+    # Loose bounds — confirms sampler isn't degenerate.
+    assert 0.10 < write_density < 0.25
+
+
+def test_r4_mix_sampler_no_families_attribute():
+    """R4MixSampler must NOT expose .families (so selection stays off)."""
+    from flip_flop.adversary.r4_sampler import R4MixSampler
+    sampler = R4MixSampler(T=64)
+    assert not hasattr(sampler, "families") or getattr(sampler, "families", None) is None
+
 
 def test_selection_inactive_when_no_families_attribute():
     """When sampler has no .families (legacy path), training behaves as before."""
