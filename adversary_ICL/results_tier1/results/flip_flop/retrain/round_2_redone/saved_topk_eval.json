@@ -1,0 +1,565 @@
+{
+  "model": "results/flip_flop/retrain/round_2_redone/model_final.pt",
+  "lstm": "results/flip_flop/lstm/model_final.pt",
+  "n_per_config": 5000,
+  "results": {
+    "r1_piecewise": {
+      "n_configs": 25,
+      "n_per_config": 5000,
+      "T_glitch_mean": 0.0004093574096262784,
+      "T_glitch_max": 0.0007552654829424003,
+      "T_glitch_min": 0.00011405832182189159,
+      "T_glitch_top5_mean": 0.0006909254580974915,
+      "lstm_glitch_max": 0.0,
+      "per_config": [
+        {
+          "rank": 1,
+          "T_glitch": 0.0001486104919007282,
+          "lstm_glitch": 0.0,
+          "search_fitness": 0.10602051710532423,
+          "search_T_glitch": 0.10602051710532423
+        },
+        {
+          "rank": 2,
+          "T_glitch": 0.0006351405970321612,
+          "lstm_glitch": 0.0,
+          "search_fitness": 0.10381172393878141,
+          "search_T_glitch": 0.10381172393878141
+        },
+        {
+          "rank": 3,
+          "T_glitch": 0.0003996674766594194,
+          "lstm_glitch": 0.0,
+          "search_fitness": 0.1032695374800638,
+          "search_T_glitch": 0.1032695374800638
+        },
+        {
+          "rank": 4,
+          "T_glitch": 0.0002639145472476491,
+          "lstm_glitch": 0.0,
+          "search_fitness": 0.10266961753924891,
+          "search_T_glitch": 0.10266961753924891
+        },
+        {
+          "rank": 5,
+          "T_glitch": 0.0005999454595036815,
+          "lstm_glitch": 0.0,
+          "search_fitness": 0.10248955115391604,
+          "search_T_glitch": 0.10248955115391604
+        },
+        {
+          "rank": 6,
+          "T_glitch": 0.00022808484756329354,
+          "lstm_glitch": 0.0,
+          "search_fitness": 0.10195105447163641,
+          "search_T_glitch": 0.10195105447163641
+        },
+        {
+          "rank": 7,
+          "T_glitch": 0.0006859546965031554,
+          "lstm_glitch": 0.0,
+          "search_fitness": 0.10179824393236456,
+          "search_T_glitch": 0.10179824393236456
+        },
+        {
+          "rank": 8,
+          "T_glitch": 0.00032035880185808104,
+          "lstm_glitch": 0.0,
+          "search_fitness": 0.10154623189047893,
+          "search_T_glitch": 0.10154623189047893
+        },
+        {
+          "rank": 9,
+          "T_glitch": 0.0007552654829424003,
+          "lstm_glitch": 0.0,
+          "search_fitness": 0.10122941980012941,
+          "search_T_glitch": 0.10122941980012941
+        },
+        {
+          "rank": 10,
+          "T_glitch": 0.0004170217395245952,
+          "lstm_glitch": 0.0,
+          "search_fitness": 0.10122852350514529,
+          "search_T_glitch": 0.10122852350514529
+        },
+        {
+          "rank": 11,
+          "T_glitch": 0.0003053307981624637,
+          "lstm_glitch": 0.0,
+          "search_fitness": 0.10110382890651949,
+          "search_T_glitch": 0.10110382890651949
+        },
+        {
+          "rank": 12,
+          "T_glitch": 0.0005468544929565141,
+          "lstm_glitch": 0.0,
+          "search_fitness": 0.1010260888549285,
+          "search_T_glitch": 0.1010260888549285
+        },
+        {
+          "rank": 13,
+          "T_glitch": 0.0003005505539693165,
+          "lstm_glitch": 0.0,
+          "search_fitness": 0.1009608878061984,
+          "search_T_glitch": 0.1009608878061984
+        },
+        {
+          "rank": 14,
+          "T_glitch": 0.00039061773404512563,
+          "lstm_glitch": 0.0,
+          "search_fitness": 0.10090854586542453,
+          "search_T_glitch": 0.10090854586542453
+        },
+        {
+          "rank": 15,
+          "T_glitch": 0.00030774154633972205,
+          "lstm_glitch": 0.0,
+          "search_fitness": 0.1007840474132609,
+          "search_T_glitch": 0.1007840474132609
+        },
+        {
+          "rank": 16,
+          "T_glitch": 0.0005658953722334004,
+          "lstm_glitch": 0.0,
+          "search_fitness": 0.10076306006652319,
+          "search_T_glitch": 0.10076306006652319
+        },
+        {
+          "rank": 17,
+          "T_glitch": 0.0007085190088191971,
+          "lstm_glitch": 0.0,
+          "search_fitness": 0.10063361908311591,
+          "search_T_glitch": 0.10063361908311591
+        },
+        {
+          "rank": 18,
+          "T_glitch": 0.0005363637887397127,
+          "lstm_glitch": 0.0,
+          "search_fitness": 0.10043205692985428,
+          "search_T_glitch": 0.10043205692985428
+        },
+        {
+          "rank": 19,
+          "T_glitch": 0.00027792309704420613,
+          "lstm_glitch": 0.0,
+          "search_fitness": 0.10029318348399707,
+          "search_T_glitch": 0.10029318348399707
+        },
+        {
+          "rank": 20,
+          "T_glitch": 0.00020035061357375408,
+          "lstm_glitch": 0.0,
+          "search_fitness": 0.10022391773096699,
+          "search_T_glitch": 0.10022391773096699
+        },
+        {
+          "rank": 21,
+          "T_glitch": 0.00011405832182189159,
+          "lstm_glitch": 0.0,
+          "search_fitness": 0.10016699751079182,
+          "search_T_glitch": 0.10016699751079182
+        },
+        {
+          "rank": 22,
+          "T_glitch": 0.00037348575882563086,
+          "lstm_glitch": 0.0,
+          "search_fitness": 0.09976044500385724,
+          "search_T_glitch": 0.09976044500385724
+        },
+        {
+          "rank": 23,
+          "T_glitch": 0.0006697475051905432,
+          "lstm_glitch": 0.0,
+          "search_fitness": 0.09950896042304948,
+          "search_T_glitch": 0.09950896042304948
+        },
+        {
+          "rank": 24,
+          "T_glitch": 0.0003230894957903339,
+          "lstm_glitch": 0.0,
+          "search_fitness": 0.09947120194369015,
+          "search_T_glitch": 0.09947120194369015
+        },
+        {
+          "rank": 25,
+          "T_glitch": 0.00015944301240998114,
+          "lstm_glitch": 0.0,
+          "search_fitness": 0.0994063789113593,
+          "search_T_glitch": 0.0994063789113593
+        }
+      ]
+    },
+    "r1_stationary": {
+      "n_configs": 25,
+      "n_per_config": 5000,
+      "T_glitch_mean": 0.0638038967594771,
+      "T_glitch_max": 0.15879637848393396,
+      "T_glitch_min": 0.007958063197243152,
+      "T_glitch_top5_mean": 0.1304337505256637,
+      "lstm_glitch_max": 0.0,
+      "per_config": [
+        {
+          "rank": 1,
+          "T_glitch": 0.03363484675507157,
+          "lstm_glitch": 0.0,
+          "search_fitness": 0.22525946499049845,
+          "search_T_glitch": 0.22525946499049845
+        },
+        {
+          "rank": 2,
+          "T_glitch": 0.0880197757570407,
+          "lstm_glitch": 0.0,
+          "search_fitness": 0.21138211382113822,
+          "search_T_glitch": 0.21138211382113822
+        },
+        {
+          "rank": 3,
+          "T_glitch": 0.1262888869304662,
+          "lstm_glitch": 0.0,
+          "search_fitness": 0.15973645680819912,
+          "search_T_glitch": 0.15973645680819912
+        },
+        {
+          "rank": 4,
+          "T_glitch": 0.02313247573911081,
+          "lstm_glitch": 0.0,
+          "search_fitness": 0.15935839028094154,
+          "search_T_glitch": 0.15935839028094154
+        },
+        {
+          "rank": 5,
+          "T_glitch": 0.062023385866802234,
+          "lstm_glitch": 0.0,
+          "search_fitness": 0.14403097846618815,
+          "search_T_glitch": 0.14403097846618815
+        },
+        {
+          "rank": 6,
+          "T_glitch": 0.02629257102523381,
+          "lstm_glitch": 0.0,
+          "search_fitness": 0.1422662136209189,
+          "search_T_glitch": 0.1422662136209189
+        },
+        {
+          "rank": 7,
+          "T_glitch": 0.07118375955707883,
+          "lstm_glitch": 0.0,
+          "search_fitness": 0.1201704128103423,
+          "search_T_glitch": 0.1201704128103423
+        },
+        {
+          "rank": 8,
+          "T_glitch": 0.0929283771532185,
+          "lstm_glitch": 0.0,
+          "search_fitness": 0.11462861462861462,
+          "search_T_glitch": 0.11462861462861462
+        },
+        {
+          "rank": 9,
+          "T_glitch": 0.021386724304647064,
+          "lstm_glitch": 0.0,
+          "search_fitness": 0.10235702882899803,
+          "search_T_glitch": 0.10235702882899803
+        },
+        {
+          "rank": 10,
+          "T_glitch": 0.15879637848393396,
+          "lstm_glitch": 0.0,
+          "search_fitness": 0.10128831630386495,
+          "search_T_glitch": 0.10128831630386495
+        },
+        {
+          "rank": 11,
+          "T_glitch": 0.04310316762704691,
+          "lstm_glitch": 0.0,
+          "search_fitness": 0.10125810563653495,
+          "search_T_glitch": 0.10125810563653495
+        },
+        {
+          "rank": 12,
+          "T_glitch": 0.01682946145723337,
+          "lstm_glitch": 0.0,
+          "search_fitness": 0.1004950495049505,
+          "search_T_glitch": 0.1004950495049505
+        },
+        {
+          "rank": 13,
+          "T_glitch": 0.11029281277728482,
+          "lstm_glitch": 0.0,
+          "search_fitness": 0.0881490173071282,
+          "search_T_glitch": 0.0881490173071282
+        },
+        {
+          "rank": 14,
+          "T_glitch": 0.06671491545496414,
+          "lstm_glitch": 0.0,
+          "search_fitness": 0.08680006542718499,
+          "search_T_glitch": 0.08680006542718499
+        },
+        {
+          "rank": 15,
+          "T_glitch": 0.05722395685495316,
+          "lstm_glitch": 0.0,
+          "search_fitness": 0.08496669838249286,
+          "search_T_glitch": 0.08496669838249286
+        },
+        {
+          "rank": 16,
+          "T_glitch": 0.11506323396567299,
+          "lstm_glitch": 0.0,
+          "search_fitness": 0.08323938369034198,
+          "search_T_glitch": 0.08323938369034198
+        },
+        {
+          "rank": 17,
+          "T_glitch": 0.0895810833854374,
+          "lstm_glitch": 0.0,
+          "search_fitness": 0.06356051373394582,
+          "search_T_glitch": 0.06356051373394582
+        },
+        {
+          "rank": 18,
+          "T_glitch": 0.01566856991103439,
+          "lstm_glitch": 0.0,
+          "search_fitness": 0.06309647161476796,
+          "search_T_glitch": 0.06309647161476796
+        },
+        {
+          "rank": 19,
+          "T_glitch": 0.08227890029811195,
+          "lstm_glitch": 0.0,
+          "search_fitness": 0.05863857016769638,
+          "search_T_glitch": 0.05863857016769638
+        },
+        {
+          "rank": 20,
+          "T_glitch": 0.14172744047096036,
+          "lstm_glitch": 0.0,
+          "search_fitness": 0.05684641239222563,
+          "search_T_glitch": 0.05684641239222563
+        },
+        {
+          "rank": 21,
+          "T_glitch": 0.0392349834333891,
+          "lstm_glitch": 0.0,
+          "search_fitness": 0.05337981371534397,
+          "search_T_glitch": 0.05337981371534397
+        },
+        {
+          "rank": 22,
+          "T_glitch": 0.027240363010300854,
+          "lstm_glitch": 0.0,
+          "search_fitness": 0.05213777010767847,
+          "search_T_glitch": 0.05213777010767847
+        },
+        {
+          "rank": 23,
+          "T_glitch": 0.02047090363376752,
+          "lstm_glitch": 0.0,
+          "search_fitness": 0.05017539615338091,
+          "search_T_glitch": 0.05017539615338091
+        },
+        {
+          "rank": 24,
+          "T_glitch": 0.058022381936923634,
+          "lstm_glitch": 0.0,
+          "search_fitness": 0.04445787767214376,
+          "search_T_glitch": 0.04445787767214376
+        },
+        {
+          "rank": 25,
+          "T_glitch": 0.007958063197243152,
+          "lstm_glitch": 0.0,
+          "search_fitness": 0.04041072391315003,
+          "search_T_glitch": 0.04041072391315003
+        }
+      ]
+    },
+    "r1_planted": {
+      "n_configs": 25,
+      "n_per_config": 5000,
+      "T_glitch_mean": 0.08,
+      "T_glitch_max": 1.0,
+      "T_glitch_min": 0.0,
+      "T_glitch_top5_mean": 0.4,
+      "lstm_glitch_max": 0.0,
+      "per_config": [
+        {
+          "rank": 1,
+          "T_glitch": 0.0,
+          "lstm_glitch": 0.0,
+          "search_fitness": 1.0,
+          "search_T_glitch": 1.0
+        },
+        {
+          "rank": 2,
+          "T_glitch": 0.0,
+          "lstm_glitch": 0.0,
+          "search_fitness": 1.0,
+          "search_T_glitch": 1.0
+        },
+        {
+          "rank": 3,
+          "T_glitch": 0.0,
+          "lstm_glitch": 0.0,
+          "search_fitness": 1.0,
+          "search_T_glitch": 1.0
+        },
+        {
+          "rank": 4,
+          "T_glitch": 0.0,
+          "lstm_glitch": 0.0,
+          "search_fitness": 0.9985,
+          "search_T_glitch": 0.9985
+        },
+        {
+          "rank": 5,
+          "T_glitch": 0.0,
+          "lstm_glitch": 0.0,
+          "search_fitness": 0.1135,
+          "search_T_glitch": 0.1135
+        },
+        {
+          "rank": 6,
+          "T_glitch": 1.0,
+          "lstm_glitch": 0.0,
+          "search_fitness": 0.0,
+          "search_T_glitch": 0.0
+        },
+        {
+          "rank": 7,
+          "T_glitch": 0.0,
+          "lstm_glitch": 0.0,
+          "search_fitness": 0.0,
+          "search_T_glitch": 0.0
+        },
+        {
+          "rank": 8,
+          "T_glitch": 0.0,
+          "lstm_glitch": 0.0,
+          "search_fitness": 0.0,
+          "search_T_glitch": 0.0
+        },
+        {
+          "rank": 9,
+          "T_glitch": 0.0,
+          "lstm_glitch": 0.0,
+          "search_fitness": 0.0,
+          "search_T_glitch": 0.0
+        },
+        {
+          "rank": 10,
+          "T_glitch": 0.0,
+          "lstm_glitch": 0.0,
+          "search_fitness": 0.0,
+          "search_T_glitch": 0.0
+        },
+        {
+          "rank": 11,
+          "T_glitch": 0.0,
+          "lstm_glitch": 0.0,
+          "search_fitness": 0.0,
+          "search_T_glitch": 0.0
+        },
+        {
+          "rank": 12,
+          "T_glitch": 0.0,
+          "lstm_glitch": 0.0,
+          "search_fitness": 0.0,
+          "search_T_glitch": 0.0
+        },
+        {
+          "rank": 13,
+          "T_glitch": 0.0,
+          "lstm_glitch": 0.0,
+          "search_fitness": 0.0,
+          "search_T_glitch": 0.0
+        },
+        {
+          "rank": 14,
+          "T_glitch": 0.0,
+          "lstm_glitch": 0.0,
+          "search_fitness": 0.0,
+          "search_T_glitch": 0.0
+        },
+        {
+          "rank": 15,
+          "T_glitch": 0.0,
+          "lstm_glitch": 0.0,
+          "search_fitness": 0.0,
+          "search_T_glitch": 0.0
+        },
+        {
+          "rank": 16,
+          "T_glitch": 0.0,
+          "lstm_glitch": 0.0,
+          "search_fitness": 0.0,
+          "search_T_glitch": 0.0
+        },
+        {
+          "rank": 17,
+          "T_glitch": 1.0,
+          "lstm_glitch": 0.0,
+          "search_fitness": 0.0,
+          "search_T_glitch": 0.0
+        },
+        {
+          "rank": 18,
+          "T_glitch": 0.0,
+          "lstm_glitch": 0.0,
+          "search_fitness": 0.0,
+          "search_T_glitch": 0.0
+        },
+        {
+          "rank": 19,
+          "T_glitch": 0.0,
+          "lstm_glitch": 0.0,
+          "search_fitness": 0.0,
+          "search_T_glitch": 0.0
+        },
+        {
+          "rank": 20,
+          "T_glitch": 0.0,
+          "lstm_glitch": 0.0,
+          "search_fitness": 0.0,
+          "search_T_glitch": 0.0
+        },
+        {
+          "rank": 21,
+          "T_glitch": 0.0,
+          "lstm_glitch": 0.0,
+          "search_fitness": 0.0,
+          "search_T_glitch": 0.0
+        },
+        {
+          "rank": 22,
+          "T_glitch": 0.0,
+          "lstm_glitch": 0.0,
+          "search_fitness": 0.0,
+          "search_T_glitch": 0.0
+        },
+        {
+          "rank": 23,
+          "T_glitch": 0.0,
+          "lstm_glitch": 0.0,
+          "search_fitness": 0.0,
+          "search_T_glitch": 0.0
+        },
+        {
+          "rank": 24,
+          "T_glitch": 0.0,
+          "lstm_glitch": 0.0,
+          "search_fitness": 0.0,
+          "search_T_glitch": 0.0
+        },
+        {
+          "rank": 25,
+          "T_glitch": 0.0,
+          "lstm_glitch": 0.0,
+          "search_fitness": 0.0,
+          "search_T_glitch": 0.0
+        }
+      ]
+    }
+  }
+}

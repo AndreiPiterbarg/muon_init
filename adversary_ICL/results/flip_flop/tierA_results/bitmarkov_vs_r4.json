@@ -1,0 +1,66 @@
+{
+  "axis": "bitmarkov",
+  "n_samples": 10000,
+  "eval_seed": 12345,
+  "batch_size": 64,
+  "families": [
+    {
+      "name": "bit_markov_c01_a1.00",
+      "kind": "ClusterFamily",
+      "alpha": 1.0,
+      "cluster_size": 1314,
+      "cluster_mean_glitch": 0.7966092313128246,
+      "rep_config": {
+        "name": "stationary",
+        "T": 512,
+        "p_w": 0.9831053463198731,
+        "p_r": 7.334890624352217e-06,
+        "bit_p1": 0.999274490683574
+      },
+      "dist": {
+        "name": "stationary",
+        "T": 512,
+        "p_w": 0.9831053463198731,
+        "p_r": 7.334890624352217e-06,
+        "bit_p1": 0.999274490683574
+      },
+      "axis": "bit_markov"
+    },
+    {
+      "name": "bit_markov_c00_a1.00",
+      "kind": "ClusterFamily",
+      "alpha": 1.0,
+      "cluster_size": 721,
+      "cluster_mean_glitch": 0.41813662008528785,
+      "rep_config": {
+        "name": "stationary",
+        "T": 512,
+        "p_w": 0.9820936799496869,
+        "p_r": 1.660180981061923e-05,
+        "bit_p1": 0.0012801158710548713
+      },
+      "dist": {
+        "name": "stationary",
+        "T": 512,
+        "p_w": 0.9820936799496869,
+        "p_r": 1.660180981061923e-05,
+        "bit_p1": 0.0012801158710548713
+      },
+      "axis": "bit_markov"
+    }
+  ],
+  "results": {
+    "baseline": {
+      "bit_markov_c01_a1.00": 0.0007990411506192569,
+      "bit_markov_c00_a1.00": 0.0017930072716406016
+    },
+    "R4_seed0": {
+      "bit_markov_c01_a1.00": 0.003495805033959249,
+      "bit_markov_c00_a1.00": 0.9611515091144537
+    },
+    "tierA_bitmarkov": {
+      "bit_markov_c01_a1.00": 0.000998801438274071,
+      "bit_markov_c00_a1.00": 0.0017930072716406016
+    }
+  }
+}

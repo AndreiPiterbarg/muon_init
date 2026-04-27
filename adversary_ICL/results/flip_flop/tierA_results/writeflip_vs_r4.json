@@ -1,0 +1,66 @@
+{
+  "axis": "writeflip",
+  "n_samples": 10000,
+  "eval_seed": 12345,
+  "batch_size": 64,
+  "families": [
+    {
+      "name": "write_flip_c00_a1.00",
+      "kind": "ClusterFamily",
+      "alpha": 1.0,
+      "cluster_size": 2627,
+      "cluster_mean_glitch": 0.3961991395631701,
+      "rep_config": {
+        "name": "stationary",
+        "T": 512,
+        "p_w": 0.9806894624627871,
+        "p_r": 0.00037166734981712135,
+        "bit_p1": 0.03255487536537109
+      },
+      "dist": {
+        "name": "stationary",
+        "T": 512,
+        "p_w": 0.9806894624627871,
+        "p_r": 0.00037166734981712135,
+        "bit_p1": 0.03255487536537109
+      },
+      "axis": "write_flip"
+    },
+    {
+      "name": "write_flip_c01_a1.00",
+      "kind": "ClusterFamily",
+      "alpha": 1.0,
+      "cluster_size": 166,
+      "cluster_mean_glitch": 0.05179538495672143,
+      "rep_config": {
+        "name": "stationary",
+        "T": 512,
+        "p_w": 0.568526285114066,
+        "p_r": 0.2388565575803897,
+        "bit_p1": 0.32282062032221603
+      },
+      "dist": {
+        "name": "stationary",
+        "T": 512,
+        "p_w": 0.568526285114066,
+        "p_r": 0.2388565575803897,
+        "bit_p1": 0.32282062032221603
+      },
+      "axis": "write_flip"
+    }
+  ],
+  "results": {
+    "baseline": {
+      "write_flip_c00_a1.00": 0.027820851956581228,
+      "write_flip_c01_a1.00": 0.03690999102684968
+    },
+    "R4_seed0": {
+      "write_flip_c00_a1.00": 0.37936696159810274,
+      "write_flip_c01_a1.00": 0.0
+    },
+    "tierA_writeflip": {
+      "write_flip_c00_a1.00": 0.00027364772416309404,
+      "write_flip_c01_a1.00": 9.411260735733421e-05
+    }
+  }
+}

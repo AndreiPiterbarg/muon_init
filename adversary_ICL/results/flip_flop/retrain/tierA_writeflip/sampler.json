@@ -1,0 +1,51 @@
+{
+  "T": 512,
+  "base_p_i": 0.8,
+  "replay_frac": 0.7,
+  "families": [
+    {
+      "name": "write_flip_c00_a1.00",
+      "kind": "ClusterFamily",
+      "alpha": 1.0,
+      "cluster_size": 2627,
+      "cluster_mean_glitch": 0.3961991395631701,
+      "rep_config": {
+        "name": "stationary",
+        "T": 512,
+        "p_w": 0.9806894624627871,
+        "p_r": 0.00037166734981712135,
+        "bit_p1": 0.03255487536537109
+      },
+      "dist": {
+        "name": "stationary",
+        "T": 512,
+        "p_w": 0.9806894624627871,
+        "p_r": 0.00037166734981712135,
+        "bit_p1": 0.03255487536537109
+      },
+      "axis": "write_flip"
+    },
+    {
+      "name": "write_flip_c01_a1.00",
+      "kind": "ClusterFamily",
+      "alpha": 1.0,
+      "cluster_size": 166,
+      "cluster_mean_glitch": 0.05179538495672143,
+      "rep_config": {
+        "name": "stationary",
+        "T": 512,
+        "p_w": 0.568526285114066,
+        "p_r": 0.2388565575803897,
+        "bit_p1": 0.32282062032221603
+      },
+      "dist": {
+        "name": "stationary",
+        "T": 512,
+        "p_w": 0.568526285114066,
+        "p_r": 0.2388565575803897,
+        "bit_p1": 0.32282062032221603
+      },
+      "axis": "write_flip"
+    }
+  ]
+}
