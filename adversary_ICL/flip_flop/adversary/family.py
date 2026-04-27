@@ -56,24 +56,40 @@ class PassthroughFamily(Family):
     """Trivial: wrap one FFLDistribution as a 'family of one'. Test / fallback."""
     dist: FFLDistribution
     name: str = "passthrough"
+    # Unified scoring fields so global ranking works across family types.
+    # For ClusterFamily these are size and cluster_mean_glitch; for
+    # PassthroughFamily we set size=1 and glitch from the source record.
+    cluster_size: int = 1
+    cluster_mean_glitch: float = 0.0
+    axis: str = ""  # "stationary" | "piecewise" | "planted" | "" (legacy)
 
     def sample(self, batch_size, rng):
         return self.dist.sample(batch_size, rng)
 
     def to_dict(self):
         return {"name": self.name, "kind": "PassthroughFamily",
-                "dist": self.dist.to_dict()}
+                "dist": self.dist.to_dict(),
+                "cluster_size": self.cluster_size,
+                "cluster_mean_glitch": self.cluster_mean_glitch,
+                "axis": self.axis}
 
 
 @dataclass
 class ClusterFamily(Family):
-    """An α-pulled-back distribution derived from one HDBSCAN cluster."""
+    """An α-pulled-back distribution derived from one HDBSCAN cluster.
+
+    Used for distribution types where parameter interpolation is well-defined
+    (Stationary, Piecewise). At α=0 the distribution equals base; at α=1 it
+    equals the cluster's representative config; at intermediate α the
+    parameters are convex combinations.
+    """
     dist: FFLDistribution               # the FFL(p_α*) distribution
     alpha: float                         # chosen pull-back
     cluster_size: int
     cluster_mean_glitch: float
     rep_config: dict                     # the cluster's representative config (pre-interpolation)
     name: str = "cluster"
+    axis: str = ""
 
     def sample(self, batch_size, rng):
         return self.dist.sample(batch_size, rng)
@@ -87,6 +103,85 @@ class ClusterFamily(Family):
             "cluster_mean_glitch": self.cluster_mean_glitch,
             "rep_config": self.rep_config,
             "dist": self.dist.to_dict(),
+            "axis": self.axis,
+        }
+
+
+@dataclass
+class MixtureFamily(Family):
+    """Mixture-of-generators family for distribution types where parameter
+    interpolation is undefined (e.g., Planted with discrete templates).
+
+    Each sequence is drawn from base_dist with probability (1-α), else from
+    one of the `adv_dists` variants picked uniformly. At α=0 every sample is
+    base; at α=1 every sample is adv; intermediate α gives a per-sequence
+    Bernoulli mixture. Validity of every output sequence is preserved
+    automatically (each sample comes from one valid FFL distribution).
+
+    Multiple `adv_dists` provide PER-SEQUENCE PARAMETER JITTER over the
+    template's discrete parameters (Tier-1 v2 fix). Phase-B-Tier-1 found that
+    training on a single planted config (b_decoy=0) closed those points but
+    opened the bit-flipped twin (b_decoy=1) — the model just flipped its
+    bias rather than learning state-tracking. Including the bit-flipped
+    twin in `adv_dists` exposes both directions during training.
+
+    The α-bisection rule (largest α with skyline-clean LSTM and Transformer
+    ~50% glitch) carries over: T_err is monotone in α by construction.
+    """
+    base_dist: FFLDistribution
+    adv_dists: list[FFLDistribution]      # 1+ variants; uniform-pick per sequence
+    alpha: float
+    cluster_size: int = 1
+    cluster_mean_glitch: float = 0.0
+    rep_config: dict = field(default_factory=dict)
+    name: str = "mixture"
+    axis: str = "planted"
+
+    def __post_init__(self):
+        assert 0.0 <= self.alpha <= 1.0, f"alpha out of [0,1]: {self.alpha}"
+        assert len(self.adv_dists) >= 1, "MixtureFamily needs >=1 adv_dist"
+        for d in self.adv_dists:
+            assert self.base_dist.T == d.T, (
+                f"T mismatch: base={self.base_dist.T}, adv={d.T}"
+            )
+
+    @property
+    def adv_dist(self) -> FFLDistribution:
+        """Backwards-compat alias: the first (representative) adv variant."""
+        return self.adv_dists[0]
+
+    def sample(self, batch_size, rng):
+        T = self.base_dist.T
+        is_adv = rng.random(batch_size) < self.alpha
+        n_adv = int(is_adv.sum())
+        n_base = batch_size - n_adv
+        out = torch.empty(batch_size, T, dtype=torch.long)
+        if n_base > 0:
+            out[~is_adv] = self.base_dist.sample(n_base, rng)
+        if n_adv > 0:
+            adv_indices = np.where(is_adv)[0]
+            # Per-sequence: pick which adv variant uniformly.
+            variant_per = rng.integers(0, len(self.adv_dists), size=n_adv)
+            for v_idx, v_dist in enumerate(self.adv_dists):
+                mask = variant_per == v_idx
+                n_v = int(mask.sum())
+                if n_v == 0:
+                    continue
+                out[adv_indices[mask]] = v_dist.sample(n_v, rng)
+        return out
+
+    def to_dict(self):
+        return {
+            "name": self.name,
+            "kind": "MixtureFamily",
+            "alpha": self.alpha,
+            "cluster_size": self.cluster_size,
+            "cluster_mean_glitch": self.cluster_mean_glitch,
+            "rep_config": self.rep_config,
+            "axis": self.axis,
+            "base_dist": self.base_dist.to_dict(),
+            "adv_dists": [d.to_dict() for d in self.adv_dists],
+            "n_adv_variants": len(self.adv_dists),
         }
 
 
@@ -326,6 +421,51 @@ def _eval_glitch(model, tokens: torch.LongTensor, batch_size: int, device: str) 
     return evaluate_dataset(model, tokens, batch_size=batch_size, device=device)["error_rate"]
 
 
+def _bisect_alpha(
+    eval_at_alpha,
+    *,
+    max_lstm_glitch: float = 0.01,
+    target_t_glitch: float = 0.5,
+    max_iter: int = 8,
+    tol: float = 0.02,
+) -> tuple[float, float, float]:
+    """Generic bisection on α ∈ [0, 1]; type-agnostic. eval_at_alpha(α) ->
+    (T_err, lstm_err). Used by pull_back_alpha (parameter interpolation) and
+    pull_back_alpha_mixture (mixture-of-generators); same numerics either way.
+
+    Returns (α*, T_err@α*, lstm_err@α*). Picks largest α satisfying both
+    skyline-clean (lstm < max_lstm_glitch) and Transformer-still-hard
+    (T_err near target_t_glitch). Endpoint cases:
+      - LSTM fails at α=1: cannot soften, return α=1 + flag.
+      - Transformer too easy at α=1: just return α=1.
+      - Transformer too hard at α=0: just return α=0.
+    """
+    t1, l1 = eval_at_alpha(1.0)
+    t0, l0 = eval_at_alpha(0.0)
+
+    if l1 >= max_lstm_glitch:
+        return (1.0, t1, l1)
+    if t1 <= target_t_glitch:
+        return (1.0, t1, l1)
+    if t0 >= target_t_glitch:
+        return (0.0, t0, l0)
+
+    lo, hi = 0.0, 1.0
+    best = (1.0, t1, l1) if abs(t1 - target_t_glitch) < abs(t0 - target_t_glitch) else (0.0, t0, l0)
+    for _ in range(max_iter):
+        mid = 0.5 * (lo + hi)
+        t_mid, l_mid = eval_at_alpha(mid)
+        if l_mid < max_lstm_glitch and abs(t_mid - target_t_glitch) < abs(best[1] - target_t_glitch):
+            best = (mid, t_mid, l_mid)
+        if abs(t_mid - target_t_glitch) < tol:
+            break
+        if t_mid < target_t_glitch:
+            lo = mid
+        else:
+            hi = mid
+    return best
+
+
 def pull_back_alpha(
     base_cfg: dict,
     adv_cfg: dict,
@@ -344,56 +484,86 @@ def pull_back_alpha(
     ref_glitch: float = 1.0,  # kept for signature stability; unused
     alphas: tuple = (),       # kept for signature stability; unused
 ) -> tuple[float, float, float]:
-    """Bisect α ∈ [0, 1] so the Transformer's glitch rate on FFL(p_α) lands
-    near `target_t_glitch`, subject to LSTM staying clean.
-
-    Rationale: the adversary's raw optimum (α=1) is brittle — the family
-    needs to represent the mechanism at a softer operating point. We target
-    an absolute glitch rate ~0.5 (model fails half the time) so training has
-    clear signal without being the razor-edge config. The T_err(α) curve
-    often cliffs near α=1 (only the exact tip breaks the model), so a
-    uniform α grid misses the transition — bisection finds it directly.
-
-    Returns (alpha*, T_glitch_at_alpha*, lstm_glitch_at_alpha*). If no
-    satisfying α exists (base already too hard / adversary's tip too easy /
-    LSTM fails everywhere), returns the closest-to-target endpoint.
-    """
-    def eval_alpha(alpha: float) -> tuple[float, float]:
+    """Bisect α via parameter interpolation (used for ClusterFamily on
+    Stationary / Piecewise types). Thin wrapper around _bisect_alpha."""
+    def eval_alpha(alpha):
         dist = interpolate_params(base_cfg, adv_cfg, alpha)
         tokens = dist.sample(n_probe, rng)
         t = _eval_glitch(transformer, tokens, batch_size, device)
         l = _eval_glitch(lstm, tokens, batch_size, device) if lstm is not None else 0.0
         return t, l
+    return _bisect_alpha(
+        eval_alpha,
+        max_lstm_glitch=max_lstm_glitch,
+        target_t_glitch=target_t_glitch,
+        max_iter=max_iter,
+        tol=tol,
+    )
 
-    t1, l1 = eval_alpha(1.0)
-    t0, l0 = eval_alpha(0.0)
 
-    # Edge cases
-    if l1 >= max_lstm_glitch:
-        # Even the adversary's tip has LSTM failing — can't recover, flag.
-        return (1.0, t1, l1)
-    if t1 <= target_t_glitch:
-        # Full-adversary dist is already below target; use it.
-        return (1.0, t1, l1)
-    if t0 >= target_t_glitch:
-        # Base distribution already too hard — use base.
-        return (0.0, t0, l0)
+def pull_back_alpha_mixture(
+    base_dist: FFLDistribution,
+    adv_dists: list[FFLDistribution],
+    transformer,
+    lstm,
+    device: str,
+    *,
+    rng: np.random.Generator,
+    n_probe: int = 1000,
+    batch_size: int = 64,
+    max_lstm_glitch: float = 0.01,
+    target_t_glitch: float = 0.5,
+    max_iter: int = 8,
+    tol: float = 0.02,
+) -> tuple[float, float, float]:
+    """Bisect α via mixture-of-generators. `adv_dists` is the list of adv
+    variants the family will sample from (e.g. [original, bit-flipped twin]
+    for planted decoy). At α=p, each training sequence is drawn from one of
+    the adv variants (uniformly) with probability p, else from base_dist.
+    Bisection rule unchanged from pull_back_alpha — T_err remains monotone
+    in α since each variant's contribution is linear."""
+    # Backwards-compat: accept a single FFLDistribution as well.
+    if not isinstance(adv_dists, (list, tuple)):
+        adv_dists = [adv_dists]
+    def eval_alpha(alpha):
+        fam = MixtureFamily(base_dist=base_dist, adv_dists=list(adv_dists), alpha=alpha)
+        tokens = fam.sample(n_probe, rng)
+        t = _eval_glitch(transformer, tokens, batch_size, device)
+        l = _eval_glitch(lstm, tokens, batch_size, device) if lstm is not None else 0.0
+        return t, l
+    return _bisect_alpha(
+        eval_alpha,
+        max_lstm_glitch=max_lstm_glitch,
+        target_t_glitch=target_t_glitch,
+        max_iter=max_iter,
+        tol=tol,
+    )
 
-    # Bisect. Assumes T_err(α) is roughly monotone increasing.
-    lo, hi = 0.0, 1.0
-    best = (1.0, t1, l1) if abs(t1 - target_t_glitch) < abs(t0 - target_t_glitch) else (0.0, t0, l0)
-    for _ in range(max_iter):
-        mid = 0.5 * (lo + hi)
-        t_mid, l_mid = eval_alpha(mid)
-        if l_mid < max_lstm_glitch and abs(t_mid - target_t_glitch) < abs(best[1] - target_t_glitch):
-            best = (mid, t_mid, l_mid)
-        if abs(t_mid - target_t_glitch) < tol:
-            break
-        if t_mid < target_t_glitch:
-            lo = mid
-        else:
-            hi = mid
-    return best
+
+def _planted_bit_flip_twins(rep_cfg: dict) -> list[dict]:
+    """Given a planted config, return the list [original, bit-flipped twin].
+
+    Bit-flip rules per template:
+      - decoy:      flip b_decoy
+      - distractor: flip b_true
+      - disagree:   flip b_last
+      - gap:        no bit param → return [original] only
+
+    Per Tier-1 finding: training on a single bit-direction overfit and
+    opened the symmetric attack. Including the twin forces the model to
+    consult the actual write history, not memorize a bit-bias.
+    """
+    template = rep_cfg.get("template")
+    params = dict(rep_cfg.get("params", {}))
+    bit_field = {"decoy": "b_decoy", "distractor": "b_true",
+                 "disagree": "b_last"}.get(template)
+    if bit_field is None or bit_field not in params:
+        return [rep_cfg]
+    twin = dict(rep_cfg)
+    twin_params = dict(params)
+    twin_params[bit_field] = 1 - int(params[bit_field])
+    twin["params"] = twin_params
+    return [rep_cfg, twin]
 
 
 # ---------------------------------------------------------------------------
@@ -407,12 +577,22 @@ def extract_families_from_adversary_log(
     lstm=None,
     device: str = "cpu",
     top_k: int = 5,
-    min_t_glitch: float = 0.5,
+    min_t_glitch: float = 0.01,
     max_lstm_glitch: float = 0.01,
     n_behavior: int = 64,
     seed: int = 0,
 ) -> list[Family]:
     """Cluster + α-pull-back extraction.
+
+    Threshold floor `min_t_glitch=0.01`: aggressive enough that mid-loop
+    rounds (where the adversary returns weaker findings as mechanisms close)
+    do not have all candidates filtered out. The previous default 0.5 caused
+    the loop to "self-sabotage as it succeeds" — see Phase B postmortem.
+    Round 3+ should switch to adaptive `max(0.01, β·max_T_in_log)`.
+
+    Selection: per-axis floor (top-1 from each non-empty axis) + global rank
+    fills remaining slots up to `top_k`. Prevents single-axis dominance
+    (Phase B saw all 4 K-cap slots collapse to planted PassthroughFamily).
 
     If `transformer` and `lstm` are not provided, returns PassthroughFamily
     stubs over the top-K highest-fitness configs (legacy behavior for tests).
@@ -437,18 +617,66 @@ def extract_families_from_adversary_log(
             for i, r in enumerate(valid[:top_k])
         ]
 
-    # Group by distribution type; Planted is skipped (no param interpolation).
+    # Group by distribution type. Planted -> MixtureFamily (mixture-of-
+    # generators α-bisection because templates are discrete and parameter
+    # interpolation is undefined). Stationary / Piecewise -> ClusterFamily
+    # (HDBSCAN + geometric median + parameter-interpolation α-bisection).
     groups: dict[str, list[dict]] = {}
+    planted_recs: list[dict] = []
     for r in valid:
         name = r["config"]["name"]
         if name == "planted":
-            continue
-        groups.setdefault(name, []).append(r)
+            planted_recs.append(r)
+        else:
+            groups.setdefault(name, []).append(r)
 
     rng = np.random.default_rng(seed)
     T = base_cfg["T"]
-    all_families: list[ClusterFamily] = []
+    base_dist = FFLDistribution.from_dict(base_cfg)
+    all_families: list[Family] = []
 
+    # ---- Planted: group by template, build MixtureFamily per template ----
+    # Each MixtureFamily includes the cluster's representative config AND
+    # its bit-flipped twin (for templates with a bit param). This addresses
+    # the Phase-B-Tier-1 finding that training on a single bit-direction
+    # closed those configs but opened the symmetric attack.
+    if planted_recs:
+        by_template: dict[str, list[dict]] = {}
+        for r in planted_recs:
+            tmpl = r["config"]["template"]
+            by_template.setdefault(tmpl, []).append(r)
+        print(f"[family] planted: {len(planted_recs)} candidates across "
+              f"{len(by_template)} template(s): {list(by_template.keys())}")
+        for tmpl, recs_t in by_template.items():
+            recs_t.sort(key=lambda r: r["fitness"], reverse=True)
+            rep_rec = recs_t[0]
+            rep_cfg = rep_rec["config"]
+            mean_g = float(np.mean([r["T_glitch"] for r in recs_t]))
+            # Generate bit-flipped twin for symmetry coverage.
+            adv_cfgs = _planted_bit_flip_twins(rep_cfg)
+            adv_dists = [FFLDistribution.from_dict(c) for c in adv_cfgs]
+            alpha, t_err, l_err = pull_back_alpha_mixture(
+                base_dist=base_dist, adv_dists=adv_dists,
+                transformer=transformer, lstm=lstm, device=device,
+                rng=rng, n_probe=1000, batch_size=64,
+                max_lstm_glitch=max_lstm_glitch,
+            )
+            fam = MixtureFamily(
+                base_dist=base_dist,
+                adv_dists=adv_dists,
+                alpha=alpha,
+                cluster_size=len(recs_t),
+                cluster_mean_glitch=mean_g,
+                rep_config=rep_cfg,
+                name=f"planted_{tmpl}_a{alpha:.2f}_n{len(adv_dists)}",
+                axis="planted",
+            )
+            all_families.append(fam)
+            print(f"[family]   planted-{tmpl}: n={len(recs_t)} mean_glitch={mean_g:.3f} "
+                  f"adv_variants={len(adv_dists)} "
+                  f"alpha*={alpha:.2f} T_err@a*={t_err:.3f} lstm@a*={l_err:.4f}")
+
+    # ---- Stationary / Piecewise / etc: HDBSCAN + ClusterFamily ----
     for dist_type, recs_g in groups.items():
         configs = [r["config"] for r in recs_g]
         if len(configs) < 10:
@@ -467,11 +695,11 @@ def extract_families_from_adversary_log(
             cluster_recs = [recs_g[i] for i in idx]
             rep_cfg = _cluster_representative_config(cluster_cfgs)
             mean_g = float(np.mean([r["T_glitch"] for r in cluster_recs]))
-            # Pull-back α vs the cluster's representative.
             alpha, t_err, l_err = pull_back_alpha(
                 base_cfg=base_cfg, adv_cfg=rep_cfg,
                 transformer=transformer, lstm=lstm, device=device,
                 T=T, rng=rng, ref_glitch=best_glitch,
+                max_lstm_glitch=max_lstm_glitch,
             )
             dist = interpolate_params(base_cfg, rep_cfg, alpha)
             fam = ClusterFamily(
@@ -480,12 +708,61 @@ def extract_families_from_adversary_log(
                 cluster_size=len(idx),
                 cluster_mean_glitch=mean_g,
                 rep_config=rep_cfg,
-                name=f"{dist_type}_c{c_idx:02d}_a{alpha:.1f}",
+                name=f"{dist_type}_c{c_idx:02d}_a{alpha:.2f}",
+                axis=dist_type,
             )
             all_families.append(fam)
-            print(f"[family]   cluster {c_idx}: n={len(idx)} mean_glitch={mean_g:.3f} "
+            print(f"[family]   {dist_type}-c{c_idx}: n={len(idx)} mean_glitch={mean_g:.3f} "
                   f"alpha*={alpha:.2f} T_err@a*={t_err:.3f} lstm@a*={l_err:.4f}")
 
-    # Rank by size * mean_glitch; keep top_k.
-    all_families.sort(key=lambda f: f.cluster_size * f.cluster_mean_glitch, reverse=True)
-    return all_families[:top_k]
+    # ---- Per-axis floor + global rank fill ----
+    return _select_with_axis_floor(all_families, top_k)
+
+
+def _select_with_axis_floor(families: list[Family], top_k: int) -> list[Family]:
+    """Reserve top-1 per non-empty axis; fill remaining slots by global rank.
+
+    This guarantees cross-axis representation in the final mixture: even if
+    one axis (typically planted, with fitness ≈ 1.0) dominates the rank,
+    each represented axis still contributes at least one family. Beyond the
+    floor, remaining slots go by global `(cluster_mean_glitch, cluster_size)`
+    rank.
+
+    If the number of distinct non-empty axes exceeds `top_k`, only the
+    highest-glitch axes get a floor slot.
+    """
+    if not families:
+        return []
+
+    # Bucket by axis (defensive against missing/empty axis field).
+    by_axis: dict[str, list[Family]] = {}
+    for f in families:
+        by_axis.setdefault(f.axis or "_unknown", []).append(f)
+
+    # Floor: top-1 per axis, ranked by mean_glitch within the axis.
+    floors: list[Family] = []
+    for axis, fams in by_axis.items():
+        fams_sorted = sorted(fams,
+                             key=lambda f: (f.cluster_mean_glitch, f.cluster_size),
+                             reverse=True)
+        floors.append(fams_sorted[0])
+
+    # If too many axes for top_k, keep only the strongest axes (by their
+    # representative's glitch).
+    floors.sort(key=lambda f: (f.cluster_mean_glitch, f.cluster_size), reverse=True)
+    floors = floors[:top_k]
+    floor_ids = {id(f) for f in floors}
+
+    # Fill remaining slots by global rank over the rest.
+    rest = [f for f in families if id(f) not in floor_ids]
+    rest.sort(key=lambda f: (f.cluster_mean_glitch, f.cluster_size), reverse=True)
+    final = floors + rest[:max(0, top_k - len(floors))]
+
+    print(f"[family] axis floor+global rank: {len(floors)} floor + "
+          f"{len(final) - len(floors)} fill = {len(final)} total")
+    print(f"[family]   selection (axis | kind | name | glitch | size):")
+    for f in final:
+        print(f"[family]     {f.axis or '?':<12} | "
+              f"{type(f).__name__:<16} | {f.name:<30} | "
+              f"{f.cluster_mean_glitch:.4f} | {f.cluster_size}")
+    return final

@@ -1,4 +1,5 @@
 """Tests for the retrain pipeline: MixedSampler + PassthroughFamily + train() plumbing."""
+import json
 import os
 import tempfile
 
@@ -102,10 +103,16 @@ def test_extract_families_from_adversary_log(tmp_path):
     with open(path, "w") as f:
         for r in recs:
             f.write(json.dumps(r) + "\n")
-    fams = extract_families_from_adversary_log(str(path), top_k=5)
+    # Verify threshold filtering: with strict 0.5 threshold, only the two
+    # high-T_glitch records pass (the 0.1 record is below threshold; the
+    # lstm_glitch=0.1 record is above max_lstm_glitch=0.01).
+    fams = extract_families_from_adversary_log(str(path), top_k=5, min_t_glitch=0.5)
     assert len(fams) == 2  # only two pass the T/LSTM gates
     names = [f.name for f in fams]
     assert names == ["adv_00", "adv_01"]
+    # With the relaxed default (0.01), the 0.1 record now also passes.
+    fams_relaxed = extract_families_from_adversary_log(str(path), top_k=5)
+    assert len(fams_relaxed) == 3
 
 
 def test_train_with_sampler_end_to_end():
@@ -132,3 +139,4 @@ def test_train_with_sampler_end_to_end():
         result = train(cfg, sampler=sampler)
         assert "last_loss" in result
         assert os.path.exists(os.path.join(cfg.out_dir, "model_final.pt"))
+

@@ -26,7 +26,7 @@ import numpy as np
 import torch
 import yaml
 
-from flip_flop.adversary.family import (Family,
+from flip_flop.adversary.family import (Family, _select_with_axis_floor,
                                          extract_families_from_adversary_log)
 from flip_flop.adversary.io import load_frozen_model
 from flip_flop.adversary.mixture_sampler import MixedSampler
@@ -42,21 +42,34 @@ DEFAULT_CONFIG = os.path.join(
 
 
 def _load_families(
-    family_sources: list[dict], base_cfg: dict, transformer, lstm, device: str,
+    family_sources: list[dict],
+    base_cfg: dict,
+    transformer,
+    lstm,
+    device: str,
+    global_top_k: int = 5,
 ) -> list[Family]:
-    """Clustering + pull-back; uses real extraction if models are provided."""
-    fams: list[Family] = []
+    """Extract families from each source, then apply per-axis floor + global
+    rank ACROSS sources (not per-source). This is what the Phase C plan calls
+    for: axis representation is enforced at the final mixture, not per log.
+
+    Each source's `top_k` is treated as a *source cap* (max candidates from
+    that source pre-aggregation). After all sources, `_select_with_axis_floor`
+    picks `global_top_k` total with the per-axis floor.
+    """
+    pooled: list[Family] = []
     for src in family_sources:
-        fams.extend(extract_families_from_adversary_log(
+        pooled.extend(extract_families_from_adversary_log(
             src["log"],
             base_cfg=base_cfg,
             transformer=transformer,
             lstm=lstm,
             device=device,
-            top_k=int(src.get("top_k", 5)),
+            top_k=int(src.get("top_k", 10)),  # source cap (pre-aggregation)
         ))
-    assert fams, "family_sources produced zero families"
-    return fams
+    assert pooled, "family_sources produced zero families"
+    # Global axis-floor + rank across all sources combined.
+    return _select_with_axis_floor(pooled, top_k=global_top_k)
 
 
 def _eval_battery(
