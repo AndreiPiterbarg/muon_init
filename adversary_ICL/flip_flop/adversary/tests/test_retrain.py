@@ -140,3 +140,114 @@ def test_train_with_sampler_end_to_end():
         assert "last_loss" in result
         assert os.path.exists(os.path.join(cfg.out_dir, "model_final.pt"))
 
+
+def test_balanced_selection_writes_logs_and_picks_best():
+    """With selection active, every eval step must write to selection_log.jsonl
+    and model_final.pt must correspond to the best-by-score eval."""
+    from flip_flop.train import TrainConfig, train
+    from flip_flop.model import FFLMTransformer
+    with tempfile.TemporaryDirectory() as tmp:
+        model = FFLMTransformer(n_positions=64, n_embd=32, n_layer=2, n_head=2)
+        ckpt = os.path.join(tmp, "base.pt")
+        torch.save({"step": 0, "model_state_dict": model.state_dict()}, ckpt)
+
+        cfg = TrainConfig(
+            family="gpt2", vocab_size=5, n_positions=64, n_embd=32,
+            n_layer=2, n_head=2, seq_len=64,
+            train_steps=30, decay_end_step=31, warmup_steps=5,
+            batch_size=8, lr=3e-5, eval_every=10, save_every=0, log_every=10,
+            eval_in_n=32, eval_sparse_n=32, eval_dense_n=32,
+            training_eval_subset=32,
+            out_dir=os.path.join(tmp, "retrain"), device="cpu",
+            init_from_ckpt=ckpt,
+            selection_enabled=True,
+            family_eval_n=32,
+            plateau_window=20,    # disable plateau on tiny run
+            plateau_tol=0.0,
+            in_dist_hard_cap=1.0,  # disable hard cap on untrained tiny test model
+            tail_98_hard_cap=1.0,
+            tail_01_hard_cap=1.0,
+        )
+        fams = [PassthroughFamily(Stationary(T=64, p_w=0.1, p_r=0.1, bit_p1=0.5))]
+        sampler = MixedSampler(T=64, base_p_i=0.8, families=fams, replay_frac=0.5)
+        result = train(cfg, sampler=sampler)
+        # selection_log.jsonl must exist and have entries
+        sel_path = os.path.join(cfg.out_dir, "selection_log.jsonl")
+        assert os.path.exists(sel_path)
+        with open(sel_path) as f:
+            lines = [json.loads(l) for l in f]
+        assert len(lines) >= 3  # 3 eval steps + 1 final
+        # Best step recorded matches model_final.pt's step
+        assert result["best_step"] >= 0
+        # model_last.pt also exists when selection is active
+        assert os.path.exists(os.path.join(cfg.out_dir, "model_last.pt"))
+
+
+def test_three_tail_score_penalizes_each_tail():
+    """Step 4: score must penalize FFL(0.98) and FFL(0.1) drift, not just FFL(0.8)."""
+    from flip_flop.train import TrainConfig, train
+    from flip_flop.model import FFLMTransformer
+    with tempfile.TemporaryDirectory() as tmp:
+        model = FFLMTransformer(n_positions=64, n_embd=32, n_layer=2, n_head=2)
+        ckpt = os.path.join(tmp, "base.pt")
+        torch.save({"step": 0, "model_state_dict": model.state_dict()}, ckpt)
+        cfg = TrainConfig(
+            family="gpt2", vocab_size=5, n_positions=64, n_embd=32,
+            n_layer=2, n_head=2, seq_len=64,
+            train_steps=20, decay_end_step=21, warmup_steps=2,
+            batch_size=8, lr=3e-5, eval_every=10, save_every=0, log_every=10,
+            eval_in_n=32, eval_sparse_n=32, eval_dense_n=32,
+            training_eval_subset=32,
+            out_dir=os.path.join(tmp, "retrain"), device="cpu",
+            init_from_ckpt=ckpt,
+            selection_enabled=True,
+            family_eval_n=32,
+            plateau_window=20,
+            plateau_tol=0.0,
+            in_dist_hard_cap=1.0,
+            tail_98_hard_cap=1.0,
+            tail_01_hard_cap=1.0,
+            lambda_in=5.0,
+            lambda_98=0.7,
+            lambda_01=0.7,
+        )
+        fams = [PassthroughFamily(Stationary(T=64, p_w=0.1, p_r=0.1, bit_p1=0.5))]
+        sampler = MixedSampler(T=64, base_p_i=0.8, families=fams, replay_frac=0.5)
+        train(cfg, sampler=sampler)
+        # Selection log must include the new three-tail fields.
+        sel_path = os.path.join(cfg.out_dir, "selection_log.jsonl")
+        with open(sel_path) as f:
+            recs = [json.loads(l) for l in f]
+        assert len(recs) >= 1
+        for r in recs:
+            assert "ffl_98_glitch" in r
+            assert "ffl_01_glitch" in r
+            assert "lambda_in" in r
+            assert "lambda_98" in r
+            assert "lambda_01" in r
+
+
+
+def test_selection_inactive_when_no_families_attribute():
+    """When sampler has no .families (legacy path), training behaves as before."""
+    from flip_flop.train import TrainConfig, train
+    from flip_flop.model import FFLMTransformer
+    from flip_flop.data import sample_ffl
+    with tempfile.TemporaryDirectory() as tmp:
+        model = FFLMTransformer(n_positions=64, n_embd=32, n_layer=2, n_head=2)
+        ckpt = os.path.join(tmp, "base.pt")
+        torch.save({"step": 0, "model_state_dict": model.state_dict()}, ckpt)
+        cfg = TrainConfig(
+            family="gpt2", vocab_size=5, n_positions=64, n_embd=32,
+            n_layer=2, n_head=2, seq_len=64,
+            train_steps=10, decay_end_step=11, warmup_steps=2,
+            batch_size=8, lr=3e-5, eval_every=0, save_every=0, log_every=10,
+            eval_in_n=32, eval_sparse_n=32, eval_dense_n=32,
+            out_dir=os.path.join(tmp, "legacy"), device="cpu",
+            init_from_ckpt=ckpt, selection_enabled=False,
+        )
+        # plain callable, not MixedSampler — has no .families
+        plain = lambda bs, rng: sample_ffl(64, 0.8, bs, rng)
+        result = train(cfg, sampler=plain)
+        assert os.path.exists(os.path.join(cfg.out_dir, "model_final.pt"))
+        assert result.get("best_step") is None

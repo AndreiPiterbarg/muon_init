@@ -9,7 +9,11 @@
 
 retrain:
   base_p_i: 0.8
-  replay_frac: 0.5
+  # Replay bumped 0.5 → 0.7 (Step 7). Per-family share at K=5 = (1-0.7)/5 = 6%,
+  # above the AdvProp ~5% floor. Trades some adversarial signal for stronger
+  # FFL anchor — the regression on FFL(0.98) at R2 (6.5% → 10.85%) was the
+  # symptom this targets.
+  replay_frac: 0.7
   # Checkpoint to initialise from. Round 1 -> baseline; round K -> round (K-1).
   init_from_ckpt: results/flip_flop/baseline/model_final.pt
   # Adversary logs to extract families from (cumulative: list all prior rounds).

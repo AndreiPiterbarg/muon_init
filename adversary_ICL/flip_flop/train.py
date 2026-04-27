@@ -68,6 +68,40 @@ class TrainConfig:
     device: str = "auto"
     # optional: continue training from an existing checkpoint (used by retrain loop)
     init_from_ckpt: str = ""
+    # Balanced selection (Fix 2 + Step 4: three-tail score). Active only when
+    # sampler has .families. Score per eval step:
+    #   score = mean(family_glitch)
+    #         + lambda_in * max(0, ffl_in_glitch  - baseline_in)
+    #         + lambda_98 * max(0, ffl_98_glitch  - baseline_98)
+    #         + lambda_01 * max(0, ffl_01_glitch  - baseline_01)
+    # Lower is better. model_final.pt = argmin(score) across eval steps.
+    # Per-tail lambdas sized to that test set's empirical noise floor:
+    # σ_emp = √(p̂(1−p̂)/N).  Round-0 baseline values:
+    #   FFL(0.8): N=26523, p̂≈0.000  → σ≈0  → lambda_in=5 (degenerate; conservative)
+    #   FFL(0.98):N=10000, p̂≈0.060  → σ≈0.0024 → lambda_98≈0.7  (1pp ≈ 4σ)
+    #   FFL(0.1): N=3000,  p̂≈0.016  → σ≈0.0023 → lambda_01≈0.7  (1pp ≈ 4σ)
+    # Hard cap fires if ANY of the three tails exceeds baseline + 0.005.
+    selection_enabled: bool = True
+    lambda_in: float = 5.0
+    lambda_98: float = 0.7
+    lambda_01: float = 0.7
+    # legacy single-lambda field kept for backwards-compat with older yamls;
+    # if set, overrides lambda_in (the historical behavior).
+    lambda_penalty: float = -1.0          # -1.0 = unset; use lambda_in
+    baseline_in_dist_glitch: float = 0.0  # spec'd from baseline run
+    baseline_98_glitch: float = 0.0599
+    baseline_01_glitch: float = 0.0157
+    in_dist_hard_cap: float = 0.005       # 0.5pp above baseline → terminate
+    tail_98_hard_cap: float = 0.005       # 0.5pp on FFL(0.98)
+    tail_01_hard_cap: float = 0.005       # 0.5pp on FFL(0.1)
+    family_eval_n: int = 2000             # sequences per family per eval step
+    plateau_window: int = 5               # consecutive evals to check
+    plateau_tol: float = 0.005            # min score-range over window to continue
+    # Memorization detector (Step 5): if any of the first
+    # `memorize_check_evals` eval steps shows min(per_family_glitch) == 0,
+    # suppress plateau halt until step >= memorize_warmup_steps.
+    memorize_check_evals: int = 2
+    memorize_warmup_steps: int = 800
 
     @classmethod
     def from_yaml(cls, path):
@@ -159,6 +193,79 @@ def train(cfg, sampler=None):
         def sampler(bs, rng):
             return sample_ffl(cfg.seq_len, cfg.train_p_i, bs, rng)
 
+    # Balanced selection setup (Fix 2). Active iff the provided sampler
+    # exposes .families (only MixedSampler does); otherwise we fall back to
+    # last-step model_final.pt as before.
+    families = getattr(sampler, "families", None)
+    selection_active = cfg.selection_enabled and families is not None and len(families) > 0
+    selection_log_fh = open(os.path.join(cfg.out_dir, "selection_log.jsonl"), "a") \
+        if selection_active else None
+    fam_rng = np.random.default_rng(cfg.seed + 200)
+    best_score = float("inf")
+    best_step = -1
+    score_window: list[float] = []
+    halt_reason = "completed"
+
+    # Resolve effective lambdas (legacy: lambda_penalty > 0 overrides lambda_in)
+    lambda_in_eff = cfg.lambda_penalty if cfg.lambda_penalty > 0 else cfg.lambda_in
+    lambda_98_eff = cfg.lambda_98
+    lambda_01_eff = cfg.lambda_01
+
+    def _eval_and_score(step_idx: int):
+        """Run full eval, eval families, compute three-tail balanced score,
+        save best checkpoint. Returns (ffl_in, ffl_98, ffl_01, fam_mean, score)."""
+        nonlocal best_score, best_step
+        # Standard FFL eval (writes to eval_log.jsonl)
+        out = _run_eval(model, eval_sets, cfg, device, step_idx, eval_fh,
+                        subset=cfg.training_eval_subset)
+        ffl_in_err = out["in_distribution"]["error_rate"]
+        ffl_98_err = out["sparse_tail"]["error_rate"]
+        ffl_01_err = out["dense_tail"]["error_rate"]
+        if not selection_active:
+            return ffl_in_err, ffl_98_err, ffl_01_err, None, None
+        # Family eval: fresh sample from each family, compute mean glitch
+        from .eval import evaluate_dataset
+        fam_glitches = []
+        for fam in families:
+            tokens = fam.sample(cfg.family_eval_n, fam_rng).to(device)
+            res = evaluate_dataset(model, tokens, batch_size=cfg.eval_batch_size, device=device)
+            fam_glitches.append(res["error_rate"])
+        fam_mean = float(np.mean(fam_glitches))
+        # Three-tail balanced score; lower is better.
+        score = (
+            fam_mean
+            + lambda_in_eff * max(0.0, ffl_in_err - cfg.baseline_in_dist_glitch)
+            + lambda_98_eff * max(0.0, ffl_98_err - cfg.baseline_98_glitch)
+            + lambda_01_eff * max(0.0, ffl_01_err - cfg.baseline_01_glitch)
+        )
+        rec = {
+            "step": step_idx,
+            "ffl_in_glitch": ffl_in_err,
+            "ffl_98_glitch": ffl_98_err,
+            "ffl_01_glitch": ffl_01_err,
+            "family_mean_glitch": fam_mean,
+            "family_glitches": fam_glitches,
+            "score": score,
+            "lambda_in": lambda_in_eff,
+            "lambda_98": lambda_98_eff,
+            "lambda_01": lambda_01_eff,
+            "baseline_in_dist_glitch": cfg.baseline_in_dist_glitch,
+            "baseline_98_glitch": cfg.baseline_98_glitch,
+            "baseline_01_glitch": cfg.baseline_01_glitch,
+        }
+        selection_log_fh.write(json.dumps(rec) + "\n")
+        selection_log_fh.flush()
+        is_best = score < best_score
+        if is_best:
+            best_score = score
+            best_step = step_idx
+            torch.save({"step": step_idx, "model_state_dict": model.state_dict()},
+                       os.path.join(cfg.out_dir, "model_final.pt"))
+            print(f"  [select] new best @ step {step_idx}: score={score:.4f} "
+                  f"(fam={fam_mean:.4f}, in={ffl_in_err:.4f}, "
+                  f"98={ffl_98_err:.4f}, 01={ffl_01_err:.4f})")
+        return ffl_in_err, ffl_98_err, ffl_01_err, fam_mean, score
+
     try:
         for step in range(cfg.train_steps):
             tokens = sampler(cfg.batch_size, train_rng).to(device)
@@ -181,23 +288,87 @@ def train(cfg, sampler=None):
                 print(f"[step {step:>6d}] loss={last_loss:.4f} lr={rec['lr']:.2e} t={rec['elapsed']:.1f}s")
 
             if cfg.eval_every > 0 and (step + 1) % cfg.eval_every == 0:
-                _run_eval(model, eval_sets, cfg, device, step + 1, eval_fh,
-                          subset=cfg.training_eval_subset)
+                ffl_in_err, ffl_98_err, ffl_01_err, fam_mean, score = _eval_and_score(step + 1)
                 model.train()
+                # Hard caps: any of three tails exceeding baseline + cap → halt.
+                # Only after warmup_steps to avoid tripping on early stochastic noise.
+                if selection_active and step + 1 >= cfg.warmup_steps:
+                    cap_violations = []
+                    if ffl_in_err > cfg.baseline_in_dist_glitch + cfg.in_dist_hard_cap:
+                        cap_violations.append(f"FFL(0.8): {ffl_in_err:.4f} > {cfg.baseline_in_dist_glitch + cfg.in_dist_hard_cap:.4f}")
+                    if ffl_98_err > cfg.baseline_98_glitch + cfg.tail_98_hard_cap:
+                        cap_violations.append(f"FFL(0.98): {ffl_98_err:.4f} > {cfg.baseline_98_glitch + cfg.tail_98_hard_cap:.4f}")
+                    if ffl_01_err > cfg.baseline_01_glitch + cfg.tail_01_hard_cap:
+                        cap_violations.append(f"FFL(0.1): {ffl_01_err:.4f} > {cfg.baseline_01_glitch + cfg.tail_01_hard_cap:.4f}")
+                    if cap_violations:
+                        print(f"  [hard cap] {'; '.join(cap_violations)}; halt")
+                        halt_reason = "tail_hard_cap"
+                        break
+                # Plateau: stop if score-range over window is below tolerance.
+                # Memorization detector (Step 5): if any of the first
+                # `memorize_check_evals` eval steps showed min(per_family)==0,
+                # suspect memorization — defer plateau halt until step >=
+                # `memorize_warmup_steps`.
+                if selection_active and score is not None:
+                    score_window.append(score)
+                    if len(score_window) > cfg.plateau_window:
+                        score_window.pop(0)
+                    if len(score_window) == cfg.plateau_window:
+                        # Read the last `memorize_check_evals` family-glitch
+                        # records from the selection log to check for early-zero.
+                        suspect_memorize = False
+                        try:
+                            with open(os.path.join(cfg.out_dir, "selection_log.jsonl")) as sf:
+                                early_recs = [json.loads(ln) for ln in sf.readlines()[:cfg.memorize_check_evals]]
+                            suspect_memorize = any(
+                                min(r.get("family_glitches", [1.0])) == 0.0
+                                for r in early_recs
+                            )
+                        except Exception:
+                            suspect_memorize = False
+
+                        if suspect_memorize and step + 1 < cfg.memorize_warmup_steps:
+                            print(f"  [plateau-defer] suspected memorization "
+                                  f"(early eval saw family_glitch=0); deferring halt "
+                                  f"until step {cfg.memorize_warmup_steps}")
+                        elif max(score_window) - min(score_window) < cfg.plateau_tol:
+                            print(f"  [plateau] score range over last "
+                                  f"{cfg.plateau_window} evals < {cfg.plateau_tol}; halt")
+                            halt_reason = "plateau"
+                            break
 
             if cfg.save_every > 0 and (step + 1) % cfg.save_every == 0:
                 torch.save(
-                    {"step": step + 1, "model_state_dict": model.state_dict(),
-                     "optimizer_state_dict": optimizer.state_dict(),
-                     "scheduler_state_dict": scheduler.state_dict()},
+                    {"step": step + 1, "model_state_dict": model.state_dict()},
                     os.path.join(cfg.out_dir, "state.pt"),
                 )
 
-        final = _run_eval(model, eval_sets, cfg, device, cfg.train_steps, eval_fh)
-        torch.save({"step": cfg.train_steps, "model_state_dict": model.state_dict()},
-                   os.path.join(cfg.out_dir, "model_final.pt"))
+        # End-of-training eval (also a candidate for best-by-score).
+        if selection_active:
+            ffl_in_err, ffl_98_err, ffl_01_err, fam_mean, score = \
+                _eval_and_score(min(step + 1, cfg.train_steps))
+        else:
+            ffl_in_err = ffl_98_err = ffl_01_err = fam_mean = score = None
+        if not selection_active:
+            # Legacy path: save last-step model_final.pt.
+            final = _run_eval(model, eval_sets, cfg, device, cfg.train_steps, eval_fh)
+            torch.save({"step": cfg.train_steps, "model_state_dict": model.state_dict()},
+                       os.path.join(cfg.out_dir, "model_final.pt"))
+        else:
+            # Selection active: model_final.pt was saved on each best update.
+            # Always also save model_last.pt for debugging.
+            torch.save({"step": step + 1, "model_state_dict": model.state_dict()},
+                       os.path.join(cfg.out_dir, "model_last.pt"))
+            print(f"[selection] best step={best_step} score={best_score:.4f} "
+                  f"halt_reason={halt_reason}")
+            final = {"step": best_step, "best_score": best_score,
+                     "halt_reason": halt_reason}
     finally:
         log_fh.close()
         eval_fh.close()
+        if selection_log_fh is not None:
+            selection_log_fh.close()
 
-    return {"final_eval": final, "last_loss": last_loss, "num_params": n_params}
+    return {"final_eval": final, "last_loss": last_loss, "num_params": n_params,
+            "halt_reason": halt_reason if selection_active else "completed",
+            "best_step": best_step if selection_active else None}
