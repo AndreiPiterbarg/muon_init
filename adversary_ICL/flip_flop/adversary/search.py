@@ -240,8 +240,11 @@ def cma_search(
 
     all_results: list[EvalResult] = []
     best = -float("inf")
+    running_mean_fitness = 0.0
+    n_running = 0
     step = 0
-    with open(log_path, "a") as fh:
+    traj_path = os.path.join(out_dir, "cma_trajectory.jsonl")
+    with open(log_path, "a") as fh, open(traj_path, "a") as tfh:
         for restart in range(num_restarts):
             rng = np.random.default_rng(seed + restart)
             x0 = encoder.random_init(rng)
@@ -251,6 +254,7 @@ def cma_search(
             while evals_done < budget_per:
                 solutions = es.ask()
                 fitnesses = []
+                gen_fitnesses_signed = []
                 for sol in solutions:
                     dist = encoder.decode(sol)
                     fr = objective_fn(dist)
@@ -259,17 +263,41 @@ def cma_search(
                     all_results.append(r)
                     fh.write(json.dumps(asdict(r)) + "\n")
                     fh.flush()
-                    # CMA minimizes; we maximize fitness.
                     fitnesses.append(-r.fitness if r.is_valid else 0.0)
+                    gen_fitnesses_signed.append(r.fitness if r.is_valid else 0.0)
                     if r.fitness > best:
                         best = r.fitness
+                    n_running += 1
+                    running_mean_fitness += (r.fitness - running_mean_fitness) / n_running
                     step += 1
                 es.tell(solutions, fitnesses)
                 evals_done += len(solutions)
                 gen += 1
+
+                # Per-generation trajectory log: lets us verify plateau claims
+                # post-hoc without re-running CMA.
+                gen_best = max(gen_fitnesses_signed)
+                gen_mean = float(np.mean(gen_fitnesses_signed))
+                c_diag = es.C_diag
+                tfh.write(json.dumps({
+                    "restart": restart,
+                    "generation": gen,
+                    "evals_done": evals_done,
+                    "gen_best": gen_best,
+                    "gen_mean": gen_mean,
+                    "running_best": best,
+                    "running_mean": running_mean_fitness,
+                    "sigma": float(es.sigma),
+                    "c_diag_max": float(c_diag.max()),
+                    "c_diag_min": float(c_diag.min()),
+                    "c_diag_ratio": float(c_diag.max() / max(c_diag.min(), 1e-30)),
+                }) + "\n")
+                tfh.flush()
+
                 if gen % log_every == 0:
                     print(f"  [cma r{restart} gen{gen:03d}] evals={evals_done}/{budget_per} "
-                          f"gen_best={max(-f for f in fitnesses):.4e} best={best:.4e}")
+                          f"gen_best={gen_best:.4e} gen_mean={gen_mean:.4e} "
+                          f"best={best:.4e} sigma={es.sigma:.3e}")
     return all_results
 
 

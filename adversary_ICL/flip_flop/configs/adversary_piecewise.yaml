@@ -19,7 +19,11 @@ distribution:
 
 cma:
   K_segments: 4
-  budget: 3000
+  # Budget cut from 3000 → 1500 based on R1 cma_trajectory.jsonl: peak fitness
+  # 0.106 was reached at eval 928 (31% of 3000); restarts 1+2 added zero
+  # improvement across 2016 wasted evals. R2 trajectory: peak 1.000 at eval
+  # 1840 (61% of 3000). 1500 leaves headroom for the slower R2-style case.
+  budget: 1500
   pop_size: 16
   sigma_init: 0.3
   num_restarts: 3
