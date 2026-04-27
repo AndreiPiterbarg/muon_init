@@ -1,0 +1,35 @@
+{
+  "ffl_0.8_in": {
+    "error_rate": 0.0,
+    "num_predictions": 26523
+  },
+  "ffl_0.98_sparse": {
+    "error_rate": 0.10269721250423203,
+    "num_predictions": 35444
+  },
+  "ffl_0.1_dense": {
+    "error_rate": 0.0043942429049477205,
+    "num_predictions": 345452
+  },
+  "family_00": {
+    "name": "planted_top00_a1.0",
+    "family_dict": {
+      "name": "planted_top00_a1.0",
+      "kind": "PassthroughFamily",
+      "dist": {
+        "name": "planted",
+        "T": 512,
+        "template": "decoy",
+        "filler_p_i": 1.0,
+        "params": {
+          "k_early": 5,
+          "k_true": 128,
+          "b_decoy": 0
+        }
+      }
+    },
+    "T_glitch": 0.0,
+    "lstm_glitch": 0.0,
+    "num_predictions": 5000
+  }
+}

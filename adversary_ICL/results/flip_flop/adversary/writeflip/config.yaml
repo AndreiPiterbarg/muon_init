@@ -1,0 +1,17 @@
+name: write_flip
+T: 512
+transformer_ckpt: results/flip_flop/baseline/model_final.pt
+transformer_cfg: results/flip_flop/baseline/config.yaml
+lstm_ckpt: results/flip_flop/lstm/model_final.pt
+lstm_cfg: results/flip_flop/lstm/config.yaml
+type: cma
+budget: 3000
+pop_size: 16
+num_restarts: 3
+sigma_init: 0.3
+n: 2000
+batch_size: 64
+lambda_lstm: 10.0
+lstm_tolerance: 0.001
+out_dir: results/flip_flop/adversary/writeflip
+seed: 0

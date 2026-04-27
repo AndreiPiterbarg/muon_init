@@ -1,0 +1,22 @@
+{
+  "T": 512,
+  "base_p_i": 0.8,
+  "replay_frac": 0.5,
+  "families": [
+    {
+      "name": "planted_top00_a1.0",
+      "kind": "PassthroughFamily",
+      "dist": {
+        "name": "planted",
+        "T": 512,
+        "template": "decoy",
+        "filler_p_i": 1.0,
+        "params": {
+          "k_early": 5,
+          "k_true": 128,
+          "b_decoy": 0
+        }
+      }
+    }
+  ]
+}

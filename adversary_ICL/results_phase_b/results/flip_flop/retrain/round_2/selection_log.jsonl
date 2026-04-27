@@ -1,0 +1,6 @@
+{"step": 200, "ffl_in_glitch": 0.0, "family_mean_glitch": 0.00025, "family_glitches": [0.001, 0.0, 0.0, 0.0], "score": 0.00025, "lambda_penalty": 1.5, "baseline_in_dist_glitch": 0.0}
+{"step": 400, "ffl_in_glitch": 0.0, "family_mean_glitch": 0.0, "family_glitches": [0.0, 0.0, 0.0, 0.0], "score": 0.0, "lambda_penalty": 1.5, "baseline_in_dist_glitch": 0.0}
+{"step": 600, "ffl_in_glitch": 0.0, "family_mean_glitch": 0.0, "family_glitches": [0.0, 0.0, 0.0, 0.0], "score": 0.0, "lambda_penalty": 1.5, "baseline_in_dist_glitch": 0.0}
+{"step": 800, "ffl_in_glitch": 0.0, "family_mean_glitch": 0.0, "family_glitches": [0.0, 0.0, 0.0, 0.0], "score": 0.0, "lambda_penalty": 1.5, "baseline_in_dist_glitch": 0.0}
+{"step": 1000, "ffl_in_glitch": 0.0, "family_mean_glitch": 0.0, "family_glitches": [0.0, 0.0, 0.0, 0.0], "score": 0.0, "lambda_penalty": 1.5, "baseline_in_dist_glitch": 0.0}
+{"step": 1000, "ffl_in_glitch": 0.0, "family_mean_glitch": 0.0, "family_glitches": [0.0, 0.0, 0.0, 0.0], "score": 0.0, "lambda_penalty": 1.5, "baseline_in_dist_glitch": 0.0}

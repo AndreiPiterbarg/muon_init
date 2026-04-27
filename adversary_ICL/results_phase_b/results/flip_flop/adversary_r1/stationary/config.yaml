@@ -1,0 +1,48 @@
+strategy: grid
+transformer_ckpt: results/flip_flop/retrain/round_1/model_final.pt
+transformer_cfg: flip_flop/configs/baseline.yaml
+lstm_ckpt: results/flip_flop/lstm/model_final.pt
+lstm_cfg: flip_flop/configs/lstm.yaml
+use_lstm: true
+dist_name: stationary
+T: 512
+param_grid:
+  p_w:
+  - 0.005
+  - 0.01
+  - 0.02
+  - 0.05
+  - 0.1
+  - 0.2
+  - 0.45
+  p_r:
+  - 0.005
+  - 0.01
+  - 0.02
+  - 0.05
+  - 0.1
+  - 0.2
+  - 0.45
+  bit_p1:
+  - 0.1
+  - 0.3
+  - 0.5
+  - 0.7
+  - 0.9
+template: gap
+filler_p_i: 1.0
+K_segments: 4
+budget: 3000
+pop_size: 16
+sigma_init: 0.3
+num_restarts: 3
+search_n: 3000
+final_eval_n: 20000
+eval_batch_size: 64
+n_final_seeds: 3
+lambda_lstm: 10.0
+lstm_tolerance: 0.001
+out_dir: results/flip_flop/adversary_r1/stationary
+top_k: 25
+seed: 0
+device: auto
